@@ -378,6 +378,42 @@ class GameEngine:
                     return
 
     # ------------------------------------------------------------------
+    # Grid observation encoding
+    # 0=empty  1=mushroom  2=centipede body  3=centipede head  4=player  5=bullet
+    GRID_EMPTY = 0
+    GRID_MUSHROOM = 1
+    GRID_BODY = 2
+    GRID_HEAD = 3
+    GRID_PLAYER = 4
+    GRID_BULLET = 5
+
+    def get_grid_obs(self) -> "list[int]":
+        """Return a flat int list of length COLS*ROWS encoding the game grid."""
+        grid = [self.GRID_EMPTY] * (COLS * ROWS)
+
+        for m in self.field.grid.values():
+            grid[m.row * COLS + m.col] = self.GRID_MUSHROOM
+
+        for chain in self.centipedes:
+            for seg in chain.segments:
+                idx = seg.row * COLS + seg.col
+                if 0 <= idx < len(grid):
+                    grid[idx] = self.GRID_HEAD if seg.is_head else self.GRID_BODY
+
+        for b in self.bullets:
+            col = b.x // TILE
+            row = b.y // TILE
+            if 0 <= col < COLS and 0 <= row < ROWS:
+                grid[row * COLS + col] = self.GRID_BULLET
+
+        p_col = self.player.x // TILE
+        p_row = self.player.y // TILE
+        if 0 <= p_col < COLS and 0 <= p_row < ROWS:
+            grid[p_row * COLS + p_col] = self.GRID_PLAYER
+
+        return grid
+
+    # ------------------------------------------------------------------
     def render(self, surf: pygame.Surface, font: pygame.font.Font | None = None):
         surf.fill(COLOR_BG)
         self.field.draw(surf)

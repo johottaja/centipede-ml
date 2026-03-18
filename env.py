@@ -15,7 +15,7 @@ from gymnasium import spaces
 
 from game import (
     GameEngine,
-    WIDTH, HEIGHT, NUM_ACTIONS,
+    WIDTH, HEIGHT, NUM_ACTIONS, COLS, ROWS,
 )
 
 
@@ -28,8 +28,10 @@ class CentipedeEnv(gym.Env):
             f"Unsupported render_mode: {render_mode}"
         self.render_mode = render_mode
 
+        # Flat grid: COLS*ROWS integers, one per tile.
+        # Values: 0=empty 1=mushroom 2=body 3=head 4=player 5=bullet
         self.observation_space = spaces.Box(
-            low=0, high=255, shape=(HEIGHT, WIDTH, 3), dtype=np.uint8
+            low=0, high=5, shape=(COLS * ROWS,), dtype=np.uint8
         )
         self.action_space = spaces.Discrete(NUM_ACTIONS)
 
@@ -98,7 +100,4 @@ class CentipedeEnv(gym.Env):
 
     # ------------------------------------------------------------------
     def _get_obs(self) -> np.ndarray:
-        self._engine.render(self._surf)
-        return np.transpose(
-            pygame.surfarray.array3d(self._surf), axes=(1, 0, 2)
-        )
+        return np.array(self._engine.get_grid_obs(), dtype=np.uint8)

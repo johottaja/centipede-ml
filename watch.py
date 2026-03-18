@@ -13,6 +13,7 @@ import pygame
 from stable_baselines3 import DQN
 
 from env import CentipedeEnv
+from game import WIDTH, HEIGHT
 from train import MODEL_PATH, make_env
 
 
@@ -26,8 +27,6 @@ def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> Non
 
     proc_env = make_env()
 
-    # Reach the underlying CentipedeEnv to grab its engine for rendering
-    from game import WIDTH, HEIGHT
     pygame.init()
     window = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Centipede – DQN Agent")
@@ -35,8 +34,7 @@ def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> Non
     font = pygame.font.SysFont("monospace", 16)
     surf = pygame.Surface((WIDTH, HEIGHT))
 
-    # Unwrap to CentipedeEnv
-    base_env = proc_env.unwrapped
+    base_env: CentipedeEnv = proc_env.unwrapped
 
     for ep in range(episodes):
         obs, _ = proc_env.reset()

@@ -1,22 +1,23 @@
 """
 Train a DQN agent on Centipede using Stable-Baselines3.
 
-Observations are preprocessed: grayscale → 84×84 → 4-frame stack (channels-first).
+Observation: flat grid vector of length COLS*ROWS (930 ints, values 0-5).
+Policy: MlpPolicy (two hidden layers).
 The trained model is saved to models/dqn_centipede.zip.
 
-Usage:
-    uv run python train.py [--timesteps N] [--seed S]
+Progress is emitted to stdout as newline-delimited JSON objects:
+  {"type": "progress", "steps": N, "total": T, "pct": P, "elapsed": S, "eta": S, "steps_per_sec": F}
+  {"type": "done", "elapsed": S}
+  {"type": "error", "message": "..."}
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import time
 
-import cv2
-import gymnasium as gym
-import numpy as np
 import torch
-from gymnasium.wrappers import FrameStackObservation
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
@@ -26,85 +27,68 @@ from env import CentipedeEnv
 MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "dqn_centipede")
 
-OBS_SIZE = 84
-N_STACK = 4
 
-
-# ---------------------------------------------------------------------------
-# Preprocessing wrapper: RGB (H,W,3) → grayscale (1, 84, 84) uint8
-# ---------------------------------------------------------------------------
-
-class PreprocessObs(gym.ObservationWrapper):
-    def __init__(self, env: gym.Env):
-        super().__init__(env)
-        self.observation_space = gym.spaces.Box(
-            low=0, high=255, shape=(1, OBS_SIZE, OBS_SIZE), dtype=np.uint8
-        )
-
-    def observation(self, obs: np.ndarray) -> np.ndarray:
-        gray = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)          # (H, W)
-        small = cv2.resize(gray, (OBS_SIZE, OBS_SIZE), interpolation=cv2.INTER_AREA)
-        return small[np.newaxis, :, :]                         # (1, 84, 84)
-
-
-# ---------------------------------------------------------------------------
-# After FrameStackObservation the shape is (N_STACK, 1, 84, 84).
-# Squeeze the channel dim → (N_STACK, 84, 84) which SB3 CnnPolicy expects.
-# ---------------------------------------------------------------------------
-
-class SqueezeStack(gym.ObservationWrapper):
-    def __init__(self, env: gym.Env):
-        super().__init__(env)
-        old = env.observation_space
-        # old.shape = (N_STACK, 1, H, W)
-        n, _, h, w = old.shape
-        self.observation_space = gym.spaces.Box(
-            low=0, high=255, shape=(n, h, w), dtype=np.uint8
-        )
-
-    def observation(self, obs) -> np.ndarray:
-        arr = np.asarray(obs)          # (N_STACK, 1, H, W)
-        return arr[:, 0, :, :]         # (N_STACK, H, W)
-
-
-# ---------------------------------------------------------------------------
-# Factory
-# ---------------------------------------------------------------------------
-
-def make_env(seed: int = 0) -> gym.Env:
+def make_env(seed: int = 0) -> CentipedeEnv:
     env = CentipedeEnv(render_mode=None)
     env = Monitor(env)
-    env = PreprocessObs(env)                          # (1, 84, 84)
-    env = FrameStackObservation(env, stack_size=N_STACK)  # (4, 1, 84, 84)
-    env = SqueezeStack(env)                           # (4, 84, 84)
     env.reset(seed=seed)
     return env
 
 
-# ---------------------------------------------------------------------------
-# Progress callback
-# ---------------------------------------------------------------------------
+def _emit(obj: dict) -> None:
+    print(json.dumps(obj), flush=True)
+
 
 class ProgressCallback(BaseCallback):
-    def __init__(self, total_timesteps: int, print_freq: int = 10_000):
+    def __init__(self, total_timesteps: int, emit_freq: int = 5_000):
         super().__init__()
         self.total_timesteps = total_timesteps
-        self.print_freq = print_freq
-        self._last_print = 0
+        self.emit_freq = emit_freq
+        self._last_emit = 0
+        self._t0 = 0.0
+
+    def _on_training_start(self) -> None:
+        self._t0 = time.monotonic()
 
     def _on_step(self) -> bool:
-        if self.num_timesteps - self._last_print >= self.print_freq:
-            self._last_print = self.num_timesteps
-            pct = 100 * self.num_timesteps / self.total_timesteps
-            print(f"  [{pct:5.1f}%] steps={self.num_timesteps:,}", flush=True)
+        if self.num_timesteps - self._last_emit >= self.emit_freq:
+            self._last_emit = self.num_timesteps
+            elapsed = time.monotonic() - self._t0
+            pct = self.num_timesteps / self.total_timesteps
+            sps = self.num_timesteps / elapsed if elapsed > 0 else 0.0
+            remaining = self.total_timesteps - self.num_timesteps
+            eta = remaining / sps if sps > 0 else 0.0
+            _emit({
+                "type": "progress",
+                "steps": self.num_timesteps,
+                "total": self.total_timesteps,
+                "pct": round(pct * 100, 2),
+                "elapsed": round(elapsed, 1),
+                "eta": round(eta, 1),
+                "steps_per_sec": round(sps, 1),
+            })
         return True
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def train(
+    total_timesteps: int = 1_000_000,
+    seed: int = 0,
+    learning_rate: float = 1e-4,
+    buffer_size: int = 100_000,
+    learning_starts: int = 10_000,
+    batch_size: int = 64,
+    tau: float = 1.0,
+    gamma: float = 0.99,
+    train_freq: int = 4,
+    gradient_steps: int = 1,
+    target_update_interval: int = 1_000,
+    exploration_fraction: float = 0.1,
+    exploration_final_eps: float = 0.01,
+    net_arch: list[int] | None = None,
+) -> None:
+    if net_arch is None:
+        net_arch = [256, 256]
 
-def train(total_timesteps: int = 1_000_000, seed: int = 0) -> None:
     os.makedirs(MODEL_DIR, exist_ok=True)
 
     if torch.backends.mps.is_available():
@@ -113,7 +97,7 @@ def train(total_timesteps: int = 1_000_000, seed: int = 0) -> None:
         device = "cuda"
     else:
         device = "cpu"
-    print(f"Using device: {device}")
+    _emit({"type": "device", "device": device})
 
     env = make_env(seed=seed)
 
@@ -126,26 +110,27 @@ def train(total_timesteps: int = 1_000_000, seed: int = 0) -> None:
     progress_cb = ProgressCallback(total_timesteps)
 
     model = DQN(
-        policy="CnnPolicy",
+        policy="MlpPolicy",
         env=env,
-        learning_rate=1e-4,
-        buffer_size=100_000,
-        learning_starts=50_000,
-        batch_size=32,
-        tau=1.0,
-        gamma=0.99,
-        train_freq=4,
-        gradient_steps=1,
-        target_update_interval=1_000,
-        exploration_fraction=0.1,
-        exploration_final_eps=0.01,
-        optimize_memory_usage=False,
+        learning_rate=learning_rate,
+        buffer_size=buffer_size,
+        learning_starts=learning_starts,
+        batch_size=batch_size,
+        tau=tau,
+        gamma=gamma,
+        train_freq=train_freq,
+        gradient_steps=gradient_steps,
+        target_update_interval=target_update_interval,
+        exploration_fraction=exploration_fraction,
+        exploration_final_eps=exploration_final_eps,
+        policy_kwargs={"net_arch": net_arch},
         device=device,
         verbose=0,
         seed=seed,
     )
 
-    print(f"Training DQN for {total_timesteps:,} timesteps …")
+    _emit({"type": "start", "total": total_timesteps})
+    t0 = time.monotonic()
     model.learn(
         total_timesteps=total_timesteps,
         callback=[checkpoint_cb, progress_cb],
@@ -153,7 +138,7 @@ def train(total_timesteps: int = 1_000_000, seed: int = 0) -> None:
     )
 
     model.save(MODEL_PATH)
-    print(f"Model saved → {MODEL_PATH}.zip")
+    _emit({"type": "done", "elapsed": round(time.monotonic() - t0, 1)})
     env.close()
 
 
@@ -161,5 +146,33 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--timesteps", type=int, default=1_000_000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--buffer-size", type=int, default=100_000)
+    parser.add_argument("--learning-starts", type=int, default=10_000)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--tau", type=float, default=1.0)
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--train-freq", type=int, default=4)
+    parser.add_argument("--gradient-steps", type=int, default=1)
+    parser.add_argument("--target-update-interval", type=int, default=1_000)
+    parser.add_argument("--exploration-fraction", type=float, default=0.1)
+    parser.add_argument("--exploration-final-eps", type=float, default=0.01)
+    parser.add_argument("--net-arch", type=str, default="256,256",
+                        help="Comma-separated hidden layer sizes, e.g. 256,256")
     args = parser.parse_args()
-    train(total_timesteps=args.timesteps, seed=args.seed)
+    train(
+        total_timesteps=args.timesteps,
+        seed=args.seed,
+        learning_rate=args.learning_rate,
+        buffer_size=args.buffer_size,
+        learning_starts=args.learning_starts,
+        batch_size=args.batch_size,
+        tau=args.tau,
+        gamma=args.gamma,
+        train_freq=args.train_freq,
+        gradient_steps=args.gradient_steps,
+        target_update_interval=args.target_update_interval,
+        exploration_fraction=args.exploration_fraction,
+        exploration_final_eps=args.exploration_final_eps,
+        net_arch=[int(x) for x in args.net_arch.split(",")],
+    )
