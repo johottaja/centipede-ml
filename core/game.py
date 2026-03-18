@@ -243,9 +243,20 @@ class GameEngine:
     render(surf) draws the current state onto any pygame Surface.
     """
 
-    def __init__(self, seed: int | None = None):
+    def __init__(
+        self,
+        seed: int | None = None,
+        reward_mushroom_hit: int = 1,
+        reward_mushroom_destroy: int = 5,
+        reward_body_hit: int = 10,
+        reward_head_hit: int = 100,
+    ):
         self._rng = random.Random(seed)
         self._font = None  # initialised lazily so pygame.font is optional
+        self.reward_mushroom_hit = reward_mushroom_hit
+        self.reward_mushroom_destroy = reward_mushroom_destroy
+        self.reward_body_hit = reward_body_hit
+        self.reward_head_hit = reward_head_hit
         self.reset()
 
     # ------------------------------------------------------------------
@@ -327,9 +338,9 @@ class GameEngine:
                 b.alive = False
                 if m.hit():
                     self.field.remove(m.col, m.row)
-                    reward += 5
+                    reward += self.reward_mushroom_destroy
                 else:
-                    reward += 1
+                    reward += self.reward_mushroom_hit
         return reward
 
     def _handle_bullet_centipede(self) -> int:
@@ -351,7 +362,7 @@ class GameEngine:
             if hit_idx is not None:
                 seg = chain.segments[hit_idx]
                 self.field.add(seg.col, seg.row)
-                reward += 100 if seg.is_head else 10
+                reward += self.reward_head_hit if seg.is_head else self.reward_body_hit
 
                 before = chain.segments[:hit_idx]
                 after = chain.segments[hit_idx + 1:]

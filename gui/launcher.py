@@ -89,7 +89,7 @@ class Launcher(tk.Tk):
 
     def _launch_game(self) -> None:
         import subprocess
-        subprocess.Popen([sys.executable, "play.py"])
+        subprocess.Popen([sys.executable, "-m", "core.play"])
 
     def _launch_train(self) -> None:
         if self._progress_win and self._progress_win.winfo_exists():
@@ -100,7 +100,7 @@ class Launcher(tk.Tk):
         except ValueError as exc:
             messagebox.showerror("Invalid hyperparameters", str(exc))
             return
-        cmd = [sys.executable, "train.py"] + extra_args
+        cmd = [sys.executable, "-m", "core.train"] + extra_args
         self._train_btn.config(text="Training… (running)", state="disabled")
         self._progress_win = ProgressWindow(self, cmd, on_done=self._on_train_done)
 
@@ -113,4 +113,4 @@ class Launcher(tk.Tk):
         if not os.path.exists(MODEL_ZIP):
             messagebox.showwarning("No model", "Train the agent first — no model file found.")
             return
-        subprocess.Popen([sys.executable, "watch.py"])
+        subprocess.Popen([sys.executable, "-m", "core.watch"])

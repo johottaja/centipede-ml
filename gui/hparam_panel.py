@@ -3,10 +3,15 @@ from tkinter import ttk
 
 from .tooltip import make_tooltip
 
-# (label, cli-key, default, type, min, max, tooltip)
-HPARAM_SPECS: list[tuple] = [
+# Each entry is either:
+#   ("section", "Section Title")          — a visual divider/header
+#   (label, cli-key, default, type, min, max, tooltip)
+SPECS: list[tuple] = [
+    ("section", "Training"),
     ("Timesteps",              "timesteps",              "1000000", "int",   1,    None, "Total environment steps to train for"),
     ("Seed",                   "seed",                   "0",       "int",   0,    None, "Random seed for reproducibility"),
+
+    ("section", "DQN"),
     ("Learning rate",          "learning-rate",          "0.0001",  "float", 0,    1,    "Adam optimizer learning rate"),
     ("Buffer size",            "buffer-size",            "100000",  "int",   1,    None, "Replay buffer capacity"),
     ("Learning starts",        "learning-starts",        "10000",   "int",   0,    None, "Steps before first gradient update"),
@@ -19,7 +24,16 @@ HPARAM_SPECS: list[tuple] = [
     ("Exploration fraction",   "exploration-fraction",   "0.1",     "float", 0,    1,    "Fraction of training spent exploring"),
     ("Final epsilon",          "exploration-final-eps",  "0.01",    "float", 0,    1,    "Epsilon at end of exploration schedule"),
     ("Net architecture",       "net-arch",               "256,256", "str",   None, None, "Hidden layer sizes, comma-separated (e.g. 256,256)"),
+
+    ("section", "Rewards"),
+    ("Mushroom hit",           "reward-mushroom-hit",     "1",      "int",   0,    None, "Reward for hitting a mushroom without destroying it"),
+    ("Mushroom destroy",       "reward-mushroom-destroy", "5",      "int",   0,    None, "Reward for fully destroying a mushroom"),
+    ("Body segment hit",       "reward-body-hit",         "10",     "int",   0,    None, "Reward for hitting a centipede body segment"),
+    ("Head hit",               "reward-head-hit",         "100",    "int",   0,    None, "Reward for hitting the centipede head"),
 ]
+
+# Only the field entries (not section headers) — used for validation and reset
+FIELD_SPECS = [s for s in SPECS if s[0] != "section"]
 
 
 class HParamPanel(tk.Frame):
@@ -48,7 +62,20 @@ class HParamPanel(tk.Frame):
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(inner_id, width=e.width))
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
-        for row, (label, key, default, _type, _min, _max, tooltip) in enumerate(HPARAM_SPECS):
+        row = 0
+        for spec in SPECS:
+            if spec[0] == "section":
+                _, title = spec
+                sep = ttk.Separator(inner, orient="horizontal")
+                sep.grid(row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(10, 2))
+                row += 1
+                tk.Label(inner, text=title, anchor="w",
+                         font=("TkDefaultFont", 9, "bold"), fg="#555555").grid(
+                    row=row, column=0, columnspan=2, sticky="w", padx=(6, 0), pady=(0, 4))
+                row += 1
+                continue
+
+            label, key, default, _type, _min, _max, tooltip = spec
             var = tk.StringVar(value=default)
             self._vars[key] = var
 
@@ -60,21 +87,23 @@ class HParamPanel(tk.Frame):
             entry.grid(row=row, column=1, sticky="ew", padx=(0, 4), pady=3)
             make_tooltip(entry, tooltip)
 
+            row += 1
+
         inner.columnconfigure(1, weight=1)
 
     def reset_defaults(self) -> None:
-        for _label, key, default, *_ in HPARAM_SPECS:
+        for _label, key, default, *_ in FIELD_SPECS:
             self._vars[key].set(default)
 
     def get_args(self) -> list[str]:
-        """Validate all entries and return a flat CLI arg list for train.py.
+        """Validate all entries and return a flat CLI arg list for core/train.py.
 
         Raises ValueError with a newline-separated message on any invalid input.
         """
         args: list[str] = []
         errors: list[str] = []
 
-        for label, key, _default, typ, mn, mx, _ in HPARAM_SPECS:
+        for label, key, _default, typ, mn, mx, _ in FIELD_SPECS:
             raw = self._vars[key].get().strip()
             if not raw:
                 errors.append(f"{label}: must not be empty")

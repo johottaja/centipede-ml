@@ -4,8 +4,8 @@ translates keyboard input into discrete actions each frame.
 """
 import sys
 import pygame
-from env import CentipedeEnv
-from game import (
+from core.env import CentipedeEnv
+from core.game import (
     ACTION_NOOP, ACTION_LEFT, ACTION_RIGHT, ACTION_UP, ACTION_DOWN,
     ACTION_FIRE, ACTION_LEFT_FIRE, ACTION_RIGHT_FIRE,
     ACTION_UP_FIRE, ACTION_DOWN_FIRE,

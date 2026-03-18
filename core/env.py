@@ -13,7 +13,7 @@ import pygame
 import gymnasium as gym
 from gymnasium import spaces
 
-from game import (
+from core.game import (
     GameEngine,
     WIDTH, HEIGHT, NUM_ACTIONS, COLS, ROWS,
 )
@@ -22,7 +22,14 @@ from game import (
 class CentipedeEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
 
-    def __init__(self, render_mode: str | None = None):
+    def __init__(
+        self,
+        render_mode: str | None = None,
+        reward_mushroom_hit: int = 1,
+        reward_mushroom_destroy: int = 5,
+        reward_body_hit: int = 10,
+        reward_head_hit: int = 100,
+    ):
         super().__init__()
         assert render_mode in (None, "human", "rgb_array"), \
             f"Unsupported render_mode: {render_mode}"
@@ -35,7 +42,12 @@ class CentipedeEnv(gym.Env):
         )
         self.action_space = spaces.Discrete(NUM_ACTIONS)
 
-        self._engine = GameEngine()
+        self._engine = GameEngine(
+            reward_mushroom_hit=reward_mushroom_hit,
+            reward_mushroom_destroy=reward_mushroom_destroy,
+            reward_body_hit=reward_body_hit,
+            reward_head_hit=reward_head_hit,
+        )
         self._surf: pygame.Surface | None = None   # off-screen surface
         self._window: pygame.Surface | None = None  # on-screen window (human mode)
         self._clock: pygame.time.Clock | None = None

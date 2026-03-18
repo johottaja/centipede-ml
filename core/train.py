@@ -22,14 +22,26 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
 
-from env import CentipedeEnv
+from core.env import CentipedeEnv
 
 MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "dqn_centipede")
 
 
-def make_env(seed: int = 0) -> CentipedeEnv:
-    env = CentipedeEnv(render_mode=None)
+def make_env(
+    seed: int = 0,
+    reward_mushroom_hit: int = 1,
+    reward_mushroom_destroy: int = 5,
+    reward_body_hit: int = 10,
+    reward_head_hit: int = 100,
+) -> CentipedeEnv:
+    env = CentipedeEnv(
+        render_mode=None,
+        reward_mushroom_hit=reward_mushroom_hit,
+        reward_mushroom_destroy=reward_mushroom_destroy,
+        reward_body_hit=reward_body_hit,
+        reward_head_hit=reward_head_hit,
+    )
     env = Monitor(env)
     env.reset(seed=seed)
     return env
@@ -85,6 +97,10 @@ def train(
     exploration_fraction: float = 0.1,
     exploration_final_eps: float = 0.01,
     net_arch: list[int] | None = None,
+    reward_mushroom_hit: int = 1,
+    reward_mushroom_destroy: int = 5,
+    reward_body_hit: int = 10,
+    reward_head_hit: int = 100,
 ) -> None:
     if net_arch is None:
         net_arch = [256, 256]
@@ -99,7 +115,13 @@ def train(
         device = "cpu"
     _emit({"type": "device", "device": device})
 
-    env = make_env(seed=seed)
+    env = make_env(
+        seed=seed,
+        reward_mushroom_hit=reward_mushroom_hit,
+        reward_mushroom_destroy=reward_mushroom_destroy,
+        reward_body_hit=reward_body_hit,
+        reward_head_hit=reward_head_hit,
+    )
 
     checkpoint_cb = CheckpointCallback(
         save_freq=100_000,
@@ -159,6 +181,10 @@ if __name__ == "__main__":
     parser.add_argument("--exploration-final-eps", type=float, default=0.01)
     parser.add_argument("--net-arch", type=str, default="256,256",
                         help="Comma-separated hidden layer sizes, e.g. 256,256")
+    parser.add_argument("--reward-mushroom-hit", type=int, default=1)
+    parser.add_argument("--reward-mushroom-destroy", type=int, default=5)
+    parser.add_argument("--reward-body-hit", type=int, default=10)
+    parser.add_argument("--reward-head-hit", type=int, default=100)
     args = parser.parse_args()
     train(
         total_timesteps=args.timesteps,
@@ -175,4 +201,8 @@ if __name__ == "__main__":
         exploration_fraction=args.exploration_fraction,
         exploration_final_eps=args.exploration_final_eps,
         net_arch=[int(x) for x in args.net_arch.split(",")],
+        reward_mushroom_hit=args.reward_mushroom_hit,
+        reward_mushroom_destroy=args.reward_mushroom_destroy,
+        reward_body_hit=args.reward_body_hit,
+        reward_head_hit=args.reward_head_hit,
     )

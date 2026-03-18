@@ -12,9 +12,9 @@ import os
 import pygame
 from stable_baselines3 import DQN
 
-from env import CentipedeEnv
-from game import WIDTH, HEIGHT
-from train import MODEL_PATH, make_env
+from core.env import CentipedeEnv
+from core.game import WIDTH, HEIGHT
+from core.train import MODEL_PATH, make_env
 
 
 def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> None:
