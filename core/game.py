@@ -116,6 +116,7 @@ class Segment:
         self.is_head = is_head
         self.dir = 1
         self.dropping = 0
+        self.vdir = 1  # vertical direction: +1 = downward, -1 = upward
         self.speed = CENTIPEDE_SPEED
 
     @property
@@ -150,9 +151,14 @@ class Centipede:
         for seg in self.segments:
             if seg.dropping > 0:
                 dy = min(seg.speed, seg.dropping)
-                seg.y += dy
+                seg.y += seg.vdir * dy
                 seg.dropping -= dy
                 if seg.dropping == 0:
+                    # Clamp to grid row boundary after drop completes
+                    seg.y = seg.row * TILE
+                    # Reverse vertical direction at top (row 0) or bottom (ROWS-1)
+                    if seg.row <= 0 or seg.row >= ROWS - 1:
+                        seg.vdir *= -1
                     seg.dir *= -1
                 continue
 
@@ -250,6 +256,8 @@ class GameEngine:
         reward_mushroom_destroy: int = 5,
         reward_body_hit: int = 10,
         reward_head_hit: int = 100,
+        reward_depth_discount: float = 0.0,
+        reward_depth_discount_fn: str = "linear",
     ):
         self._rng = random.Random(seed)
         self._font = None  # initialised lazily so pygame.font is optional
@@ -257,6 +265,8 @@ class GameEngine:
         self.reward_mushroom_destroy = reward_mushroom_destroy
         self.reward_body_hit = reward_body_hit
         self.reward_head_hit = reward_head_hit
+        self.reward_depth_discount = reward_depth_discount
+        self.reward_depth_discount_fn = reward_depth_discount_fn
         self.reset()
 
     # ------------------------------------------------------------------
@@ -270,6 +280,7 @@ class GameEngine:
         random.random = self._rng.random  # type: ignore[assignment]
 
         self.score = 0
+        self.segments_destroyed = 0
         self.player = Player()
         self.bullets: list[Bullet] = []
         self.centipedes: list[Centipede] = []
@@ -362,7 +373,17 @@ class GameEngine:
             if hit_idx is not None:
                 seg = chain.segments[hit_idx]
                 self.field.add(seg.col, seg.row)
-                reward += self.reward_head_hit if seg.is_head else self.reward_body_hit
+                base = self.reward_head_hit if seg.is_head else self.reward_body_hit
+                if self.reward_depth_discount > 0.0:
+                    depth_fraction = seg.row / max(1, ROWS - 1)
+                    if self.reward_depth_discount_fn == "exponential":
+                        multiplier = (1.0 - self.reward_depth_discount) ** depth_fraction
+                    else:  # linear
+                        multiplier = 1.0 - self.reward_depth_discount * depth_fraction
+                    reward += base * multiplier
+                else:
+                    reward += base
+                self.segments_destroyed += 1
 
                 before = chain.segments[:hit_idx]
                 after = chain.segments[hit_idx + 1:]

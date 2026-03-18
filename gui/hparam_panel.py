@@ -4,11 +4,12 @@ from tkinter import ttk
 from .tooltip import make_tooltip
 
 # Each entry is either:
-#   ("section", "Section Title")          — a visual divider/header
+#   ("section", "Section Title")                          — a visual divider/header
 #   (label, cli-key, default, type, min, max, tooltip)
+#   For type "choice": min holds the list of allowed values, max is unused.
 SPECS: list[tuple] = [
     ("section", "Training"),
-    ("Timesteps",              "timesteps",              "1000000", "int",   1,    None, "Total environment steps to train for"),
+    ("Timesteps",              "timesteps",              "100000", "int",   1,    None, "Total environment steps to train for"),
     ("Seed",                   "seed",                   "0",       "int",   0,    None, "Random seed for reproducibility"),
 
     ("section", "DQN"),
@@ -30,6 +31,8 @@ SPECS: list[tuple] = [
     ("Mushroom destroy",       "reward-mushroom-destroy", "5",      "int",   0,    None, "Reward for fully destroying a mushroom"),
     ("Body segment hit",       "reward-body-hit",         "10",     "int",   0,    None, "Reward for hitting a centipede body segment"),
     ("Head hit",               "reward-head-hit",         "100",    "int",   0,    None, "Reward for hitting the centipede head"),
+    ("Depth discount",         "reward-depth-discount",   "0.0",    "float", 0,    1,    "Fraction by which hit rewards are reduced at the bottom row (0 = disabled, 1 = zero reward at bottom)"),
+    ("Depth discount fn",      "reward-depth-discount-fn","linear", "choice", ["linear", "exponential"], None, "Shape of the depth discount curve"),
 ]
 
 # Only the field entries (not section headers) — used for validation and reset
@@ -83,9 +86,13 @@ class HParamPanel(tk.Frame):
             lbl.grid(row=row, column=0, sticky="w", padx=(4, 8), pady=3)
             make_tooltip(lbl, tooltip)
 
-            entry = tk.Entry(inner, textvariable=var, width=18)
-            entry.grid(row=row, column=1, sticky="ew", padx=(0, 4), pady=3)
-            make_tooltip(entry, tooltip)
+            if _type == "choice":
+                widget = ttk.Combobox(inner, textvariable=var, values=_min,
+                                      state="readonly", width=16)
+            else:
+                widget = tk.Entry(inner, textvariable=var, width=18)
+            widget.grid(row=row, column=1, sticky="ew", padx=(0, 4), pady=3)
+            make_tooltip(widget, tooltip)
 
             row += 1
 
@@ -134,6 +141,10 @@ class HParamPanel(tk.Frame):
                 parts = [p.strip() for p in raw.split(",")]
                 if not all(p.isdigit() and int(p) > 0 for p in parts):
                     errors.append(f"{label}: must be comma-separated positive integers (e.g. 256,256)")
+                    continue
+            elif typ == "choice":
+                if raw not in mn:
+                    errors.append(f"{label}: must be one of {mn}")
                     continue
 
             args += [f"--{key}", raw]

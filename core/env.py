@@ -29,6 +29,8 @@ class CentipedeEnv(gym.Env):
         reward_mushroom_destroy: int = 5,
         reward_body_hit: int = 10,
         reward_head_hit: int = 100,
+        reward_depth_discount: float = 0.0,
+        reward_depth_discount_fn: str = "linear",
     ):
         super().__init__()
         assert render_mode in (None, "human", "rgb_array"), \
@@ -47,6 +49,8 @@ class CentipedeEnv(gym.Env):
             reward_mushroom_destroy=reward_mushroom_destroy,
             reward_body_hit=reward_body_hit,
             reward_head_hit=reward_head_hit,
+            reward_depth_discount=reward_depth_discount,
+            reward_depth_discount_fn=reward_depth_discount_fn,
         )
         self._surf: pygame.Surface | None = None   # off-screen surface
         self._window: pygame.Surface | None = None  # on-screen window (human mode)
@@ -82,7 +86,11 @@ class CentipedeEnv(gym.Env):
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
         reward, terminated, truncated = self._engine.step(int(action))
         obs = self._get_obs()
-        info = {"score": self._engine.score, "lives": self._engine.player.lives}
+        info = {
+            "score": self._engine.score,
+            "lives": self._engine.player.lives,
+            "segments_destroyed": self._engine.segments_destroyed,
+        }
         return obs, float(reward), terminated, truncated, info
 
     # ------------------------------------------------------------------
