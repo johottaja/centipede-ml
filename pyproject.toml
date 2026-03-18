@@ -5,5 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "gymnasium>=1.2.3",
+    "numpy>=2.4.3",
+    "opencv-python-headless>=4.13.0.92",
     "pygame-ce>=2.5.7",
+    "stable-baselines3>=2.7.1",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
 ]
