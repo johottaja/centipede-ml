@@ -1,12 +1,15 @@
 """
 Gymnasium environment for Centipede.
 
-Observation : entity-centric float32 vector of length RELATIVE_OBS_SIZE (95)
+Observation : entity-centric float32 vector of length RELATIVE_OBS_SIZE (105)
               Layout:
-                [0..83]  12 centipede segment slots × 7 features
-                         (rel_x, rel_y, vel_x, vel_y, is_alive, is_head, dist_to_obstacle)
-                [84..86] bullet (rel_x, rel_y, is_alive)
-                [87..94] 8-way lidar distances from player (N,NE,E,SE,S,SW,W,NW)
+                [0..83]   12 centipede segment slots × 7 features
+                          (rel_x, rel_y, vel_x, vel_y, is_alive, is_head, dist_to_obstacle)
+                [84..86]  bullet (rel_x, rel_y, is_alive)
+                [87..96]  2 spider slots × 5 features
+                          (rel_x, rel_y, vel_x, vel_y, is_alive)
+                [97..104] 8-way lidar distances from player — walls + mushrooms only
+                          (N, NE, E, SE, S, SW, W, NW)
 Action space: Discrete(6)  – see game.ACTION_* constants
 Reward       : score delta per step
 Terminated   : player loses all lives

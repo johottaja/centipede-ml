@@ -100,6 +100,7 @@ class Launcher(tk.Tk):
         except ValueError as exc:
             messagebox.showerror("Invalid hyperparameters", str(exc))
             return
+        self._hparam_panel.save()
         cmd = [sys.executable, "-m", "core.train"] + extra_args
         self._train_btn.config(text="Training… (running)", state="disabled")
         self._progress_win = ProgressWindow(self, cmd, on_done=self._on_train_done)

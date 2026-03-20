@@ -569,18 +569,28 @@ class GameEngine:
     # ------------------------------------------------------------------
     # Relative / entity-centric observation
     #
-    # Layout (95 float32 values):
-    #   [0 .. 83]  12 centipede segment slots × 7 features each:
+    # Layout (105 float32 values):
+    #   [0  .. 83]  12 centipede segment slots × 7 features each:
     #                rel_x, rel_y, vel_x, vel_y, is_alive, is_head, dist_to_obstacle
-    #   [84 .. 86] bullet: rel_x, rel_y, is_alive
-    #   [87 .. 94] 8-way lidar distances from the player
-    #              order: N, NE, E, SE, S, SW, W, NW
+    #   [84 .. 86]  bullet: rel_x, rel_y, is_alive
+    #   [87 .. 96]  2 spider slots × 5 features each:
+    #                rel_x, rel_y, vel_x, vel_y, is_alive
+    #   [97 .. 104] 8-way lidar distances from the player (walls + mushrooms only)
+    #               order: N, NE, E, SE, S, SW, W, NW
     _SEG_FEATURES = 7
+    _SPIDER_FEATURES = 5
+    # SPIDER_LIFETIME / SPIDER_SPAWN_INTERVAL = 600 / 300 → at most 2 alive at once
+    _MAX_SPIDERS = 2
     _LIDAR_DIRS: list[tuple[int, int]] = [
         (0, -1), (1, -1), (1, 0), (1, 1),
         (0,  1), (-1, 1), (-1, 0), (-1, -1),
     ]
-    RELATIVE_OBS_SIZE = CENTIPEDE_LENGTH * _SEG_FEATURES + 3 + len(_LIDAR_DIRS)  # 95
+    RELATIVE_OBS_SIZE = (
+        CENTIPEDE_LENGTH * _SEG_FEATURES          # 84
+        + 3                                        # bullet
+        + _MAX_SPIDERS * _SPIDER_FEATURES          # 10
+        + len(_LIDAR_DIRS)                         # 8
+    )  # 105
 
     def _seg_obstacle_dist(self, seg: "Segment") -> float:
         """Horizontal distance in tiles to the next wall/mushroom in seg.dir.
@@ -655,11 +665,20 @@ class GameEngine:
             out[offset + 2] = 1.0  # is_alive
         offset += 3
 
-        # 8-way lidar from player tile
-        spider_tiles: set[tuple[int, int]] = {
-            (int(s.x) // TILE, int(s.y) // TILE)
-            for s in self._spider_mgr.spiders
-        }
+        # Spider slots
+        spiders = self._spider_mgr.spiders
+        for i in range(self._MAX_SPIDERS):
+            if i < len(spiders):
+                s = spiders[i]
+                out[offset]     = (s.x - px) / WIDTH
+                out[offset + 1] = (s.y - py) / HEIGHT
+                out[offset + 2] = s.dx / max(abs(s.dx), 1e-6) if s.dx != 0 else 0.0  # sign of dx
+                out[offset + 3] = s.dy / max(abs(s.dy), 1e-6) if s.dy != 0 else 0.0  # sign of dy
+                out[offset + 4] = 1.0  # is_alive
+            # unoccupied slot stays all-zero
+            offset += self._SPIDER_FEATURES
+
+        # 8-way lidar from player tile (walls and mushrooms only)
         max_dist = float(max(COLS, ROWS))
         for d_idx, (dc, dr) in enumerate(self._LIDAR_DIRS):
             c, r = pcol, prow
@@ -671,8 +690,6 @@ class GameEngine:
                 if c < 0 or c >= COLS or r < 0 or r >= ROWS:
                     break
                 if self.field.get(c, r) is not None:
-                    break
-                if (c, r) in spider_tiles:
                     break
             out[offset + d_idx] = steps / max_dist
 
