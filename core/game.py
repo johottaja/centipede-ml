@@ -3,7 +3,9 @@ Pure game-logic engine for Centipede.
 No event loop, no window – just state + step().
 Rendering is done via render(surf) onto a caller-supplied pygame Surface.
 """
+import math
 import random
+import numpy as np
 import pygame
 
 # ---------------------------------------------------------------------------
@@ -20,6 +22,7 @@ COLOR_PLAYER = (0, 200, 255)
 COLOR_BULLET = (255, 255, 100)
 COLOR_CENTIPEDE_HEAD = (255, 50, 50)
 COLOR_CENTIPEDE_BODY = (200, 0, 0)
+COLOR_SPIDER = (255, 165, 0)
 COLOR_HUD = (255, 255, 255)
 
 MUSHROOM_HP = 4
@@ -28,6 +31,12 @@ CENTIPEDE_SPEED = 2
 PLAYER_SPEED = 4
 BULLET_SPEED = 8
 SHOOT_COOLDOWN = 8
+
+# Spider constants
+SPIDER_SPEED = 2
+SPIDER_SPAWN_INTERVAL = 300   # frames between spider spawns
+SPIDER_LIFETIME = 600         # frames before a spider despawns on its own
+SPIDER_DIR_CHANGE_INTERVAL = 30  # frames between random direction changes
 
 
 # ---------------------------------------------------------------------------
@@ -39,11 +48,7 @@ ACTION_RIGHT = 2
 ACTION_UP = 3
 ACTION_DOWN = 4
 ACTION_FIRE = 5
-ACTION_LEFT_FIRE = 6
-ACTION_RIGHT_FIRE = 7
-ACTION_UP_FIRE = 8
-ACTION_DOWN_FIRE = 9
-NUM_ACTIONS = 10
+NUM_ACTIONS = 6
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +109,7 @@ class MushroomField:
         for c in range(c1, c2 + 1):
             for r in range(r1, r2 + 1):
                 m = self.grid.get((c, r))
-                if m and m.rect.colliderect(rect):
+                if m:
                     return m
         return None
 
@@ -118,10 +123,16 @@ class Segment:
         self.dropping = 0
         self.vdir = 1  # vertical direction: +1 = downward, -1 = upward
         self.speed = CENTIPEDE_SPEED
+        self._rect = pygame.Rect(int(x), int(y), TILE, TILE)
+
+    def _sync_rect(self):
+        self._rect.x = int(self.x)
+        self._rect.y = int(self.y)
 
     @property
     def rect(self):
-        return pygame.Rect(int(self.x), int(self.y), TILE, TILE)
+        self._sync_rect()
+        return self._rect
 
     @property
     def col(self):
@@ -196,6 +207,101 @@ class Bullet:
         pygame.draw.rect(surf, COLOR_BULLET, self.rect)
 
 
+class Spider:
+    """
+    Erratic enemy that roams the player zone, eating mushrooms it touches.
+    Spawns at a random side edge of the player zone and wanders until killed
+    or its lifetime expires.
+    """
+
+    def __init__(self, rng: random.Random):
+        # Spawn on a random side, in the player zone rows
+        side = rng.choice((-1, 1))
+        self.x = float(0 if side == 1 else WIDTH - TILE)
+        self.y = float(rng.randint(PLAYER_ZONE_TOP, ROWS - 2) * TILE)
+        self.dx = float(side * SPIDER_SPEED)
+        self.dy = float(rng.choice((-1, 0, 1)) * SPIDER_SPEED)
+        self.alive = True
+        self.lifetime = SPIDER_LIFETIME
+        self._dir_timer = 0
+        self._rng = rng
+
+    @property
+    def rect(self):
+        return pygame.Rect(int(self.x), int(self.y), TILE, TILE)
+
+    @property
+    def col(self):
+        return int(self.x) // TILE
+
+    @property
+    def row(self):
+        return int(self.y) // TILE
+
+    def update(self, field: "MushroomField"):
+        self.lifetime -= 1
+        if self.lifetime <= 0:
+            self.alive = False
+            return
+
+        self._dir_timer += 1
+        if self._dir_timer >= SPIDER_DIR_CHANGE_INTERVAL:
+            self._dir_timer = 0
+            self.dx = float(self._rng.choice((-1, 0, 1)) * SPIDER_SPEED)
+            self.dy = float(self._rng.choice((-1, 0, 1)) * SPIDER_SPEED)
+            # Bias toward staying on-screen horizontally
+            if self.x <= 0:
+                self.dx = abs(self.dx) if self.dx == 0 else abs(self.dx)
+            elif self.x >= WIDTH - TILE:
+                self.dx = -abs(self.dx) if self.dx == 0 else -abs(self.dx)
+
+        self.x = max(0.0, min(float(WIDTH - TILE), self.x + self.dx))
+        self.y = max(float(PLAYER_ZONE_TOP * TILE),
+                     min(float((ROWS - 1) * TILE), self.y + self.dy))
+
+        # Eat any mushroom the spider overlaps
+        m = field.collides(self.rect)
+        if m:
+            field.remove(m.col, m.row)
+
+    def draw(self, surf: pygame.Surface):
+        r = self.rect
+        cx, cy = r.centerx, r.centery
+        half = TILE // 2 - 1
+        # Body: small filled circle
+        pygame.draw.circle(surf, COLOR_SPIDER, (cx, cy), half - 2)
+        # Eight legs as short lines radiating outward
+        for angle_idx in range(8):
+            angle = angle_idx * math.pi / 4
+            lx = int(cx + math.cos(angle) * (half + 2))
+            ly = int(cy + math.sin(angle) * (half + 2))
+            pygame.draw.line(surf, COLOR_SPIDER, (cx, cy), (lx, ly), 1)
+
+
+class SpiderManager:
+    def __init__(self):
+        self.spiders: list[Spider] = []
+        self._spawn_timer = 0
+
+    def reset(self):
+        self.spiders = []
+        self._spawn_timer = 0
+
+    def update(self, field: "MushroomField", rng: random.Random):
+        self._spawn_timer += 1
+        if self._spawn_timer >= SPIDER_SPAWN_INTERVAL:
+            self._spawn_timer = 0
+            self.spiders.append(Spider(rng))
+
+        for s in self.spiders:
+            s.update(field)
+        self.spiders = [s for s in self.spiders if s.alive]
+
+    def draw(self, surf: pygame.Surface):
+        for s in self.spiders:
+            s.draw(surf)
+
+
 class Player:
     def __init__(self):
         self.x = WIDTH // 2 - TILE // 2
@@ -209,24 +315,19 @@ class Player:
 
     def apply_action(self, action: int):
         """Move and optionally fire based on a discrete action integer."""
-        move = action in (ACTION_LEFT, ACTION_LEFT_FIRE)
-        if move:
+        if action == ACTION_LEFT:
             self.x = max(0, self.x - PLAYER_SPEED)
-        move = action in (ACTION_RIGHT, ACTION_RIGHT_FIRE)
-        if move:
+        if action == ACTION_RIGHT:
             self.x = min(WIDTH - TILE, self.x + PLAYER_SPEED)
-        move = action in (ACTION_UP, ACTION_UP_FIRE)
-        if move:
+        if action == ACTION_UP:
             self.y = max(PLAYER_ZONE_TOP * TILE, self.y - PLAYER_SPEED)
-        move = action in (ACTION_DOWN, ACTION_DOWN_FIRE)
-        if move:
+        if action == ACTION_DOWN:
             self.y = min(HEIGHT - TILE, self.y + PLAYER_SPEED)
         if self.cooldown > 0:
             self.cooldown -= 1
 
     def wants_fire(self, action: int) -> bool:
-        return action in (ACTION_FIRE, ACTION_LEFT_FIRE, ACTION_RIGHT_FIRE,
-                          ACTION_UP_FIRE, ACTION_DOWN_FIRE)
+        return action == ACTION_FIRE
 
     def shoot(self):
         if self.cooldown > 0:
@@ -258,6 +359,9 @@ class GameEngine:
         reward_head_hit: int = 100,
         reward_depth_discount: float = 0.0,
         reward_depth_discount_fn: str = "linear",
+        reward_spider_hit: int = 300,
+        reward_spider_penalty: int = 0,
+        reward_centipede_penalty: int = 0,
     ):
         self._rng = random.Random(seed)
         self._font = None  # initialised lazily so pygame.font is optional
@@ -267,6 +371,9 @@ class GameEngine:
         self.reward_head_hit = reward_head_hit
         self.reward_depth_discount = reward_depth_discount
         self.reward_depth_discount_fn = reward_depth_discount_fn
+        self.reward_spider_hit = reward_spider_hit
+        self.reward_spider_penalty = reward_spider_penalty
+        self.reward_centipede_penalty = reward_centipede_penalty
         self.reset()
 
     # ------------------------------------------------------------------
@@ -281,12 +388,14 @@ class GameEngine:
 
         self.score = 0
         self.segments_destroyed = 0
+        self.spiders_destroyed = 0
         self.player = Player()
         self.bullets: list[Bullet] = []
         self.centipedes: list[Centipede] = []
         self.field = MushroomField()
         self.field.populate()
         self._spawn_centipede()
+        self._spider_mgr = SpiderManager()
         self.terminated = False
         self.truncated = False
 
@@ -323,14 +432,19 @@ class GameEngine:
 
         for b in self.bullets:
             b.update()
-        self.bullets = [b for b in self.bullets if b.alive]
+        if self.bullets and not self.bullets[0].alive:
+            self.bullets.clear()
 
         for c in self.centipedes:
             c.update(self.field)
 
+        self._spider_mgr.update(self.field, self._rng)
+
         reward += self._handle_bullet_mushroom()
         reward += self._handle_bullet_centipede()
-        self._handle_player_centipede()
+        reward += self._handle_bullet_spider()
+        reward += self._handle_player_centipede()
+        reward += self._handle_player_spider()
 
         if not self.centipedes:
             self._spawn_centipede()
@@ -397,7 +511,7 @@ class GameEngine:
         self.centipedes = new_centipedes
         return reward
 
-    def _handle_player_centipede(self):
+    def _handle_player_centipede(self) -> int:
         for chain in self.centipedes:
             for seg in chain.segments:
                 if self.player.rect.colliderect(seg.rect):
@@ -407,43 +521,90 @@ class GameEngine:
                     else:
                         self.player.x = WIDTH // 2 - TILE // 2
                         self.player.y = (ROWS - 2) * TILE
-                    return
+                    return -self.reward_centipede_penalty
+        return 0
+
+    def _handle_bullet_spider(self) -> int:
+        reward = 0
+        for b in self.bullets:
+            if not b.alive:
+                continue
+            for s in self._spider_mgr.spiders:
+                if s.alive and b.rect.colliderect(s.rect):
+                    b.alive = False
+                    s.alive = False
+                    self.spiders_destroyed += 1
+                    reward += self.reward_spider_hit
+                    break
+        self._spider_mgr.spiders = [s for s in self._spider_mgr.spiders if s.alive]
+        return reward
+
+    def _handle_player_spider(self) -> int:
+        for s in self._spider_mgr.spiders:
+            if s.alive and self.player.rect.colliderect(s.rect):
+                s.alive = False
+                self._spider_mgr.spiders = [sp for sp in self._spider_mgr.spiders if sp.alive]
+                self.player.lives -= 1
+                if self.player.lives <= 0:
+                    self.terminated = True
+                else:
+                    self.player.x = WIDTH // 2 - TILE // 2
+                    self.player.y = (ROWS - 2) * TILE
+                return -self.reward_spider_penalty
+        return 0
 
     # ------------------------------------------------------------------
     # Grid observation encoding
-    # 0=empty  1=mushroom  2=centipede body  3=centipede head  4=player  5=bullet
+    # 0=empty  1=mushroom  2=centipede body  3=centipede head
+    # 4=player  5=bullet  6=spider
     GRID_EMPTY = 0
     GRID_MUSHROOM = 1
     GRID_BODY = 2
     GRID_HEAD = 3
     GRID_PLAYER = 4
     GRID_BULLET = 5
+    GRID_SPIDER = 6
+    GRID_MAX = 6  # highest value in the encoding (used by env observation_space)
 
-    def get_grid_obs(self) -> "list[int]":
-        """Return a flat int list of length COLS*ROWS encoding the game grid."""
-        grid = [self.GRID_EMPTY] * (COLS * ROWS)
+    def get_grid_obs(self, out: np.ndarray | None = None) -> np.ndarray:
+        """Write the game grid into *out* (or a fresh array) and return it.
+
+        *out* must be a contiguous uint8 array of length COLS*ROWS when provided.
+        Passing a pre-allocated buffer avoids a heap allocation on every step.
+        """
+        if out is None:
+            out = np.empty(COLS * ROWS, dtype=np.uint8)
+        out[:] = self.GRID_EMPTY
 
         for m in self.field.grid.values():
-            grid[m.row * COLS + m.col] = self.GRID_MUSHROOM
+            out[m.row * COLS + m.col] = self.GRID_MUSHROOM
 
         for chain in self.centipedes:
             for seg in chain.segments:
-                idx = seg.row * COLS + seg.col
-                if 0 <= idx < len(grid):
-                    grid[idx] = self.GRID_HEAD if seg.is_head else self.GRID_BODY
+                col = int(seg.x) // TILE
+                row = int(seg.y) // TILE
+                idx = row * COLS + col
+                if 0 <= idx < COLS * ROWS:
+                    out[idx] = self.GRID_HEAD if seg.is_head else self.GRID_BODY
+
+        for s in self._spider_mgr.spiders:
+            s_col = int(s.x) // TILE
+            s_row = int(s.y) // TILE
+            if 0 <= s_col < COLS and 0 <= s_row < ROWS:
+                out[s_row * COLS + s_col] = self.GRID_SPIDER
 
         for b in self.bullets:
             col = b.x // TILE
             row = b.y // TILE
             if 0 <= col < COLS and 0 <= row < ROWS:
-                grid[row * COLS + col] = self.GRID_BULLET
+                out[row * COLS + col] = self.GRID_BULLET
 
         p_col = self.player.x // TILE
         p_row = self.player.y // TILE
         if 0 <= p_col < COLS and 0 <= p_row < ROWS:
-            grid[p_row * COLS + p_col] = self.GRID_PLAYER
+            out[p_row * COLS + p_col] = self.GRID_PLAYER
 
-        return grid
+        return out
 
     # ------------------------------------------------------------------
     def render(self, surf: pygame.Surface, font: pygame.font.Font | None = None):
@@ -451,6 +612,7 @@ class GameEngine:
         self.field.draw(surf)
         for c in self.centipedes:
             c.draw(surf)
+        self._spider_mgr.draw(surf)
         for b in self.bullets:
             b.draw(surf)
         if not self.terminated:

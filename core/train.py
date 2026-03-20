@@ -36,6 +36,9 @@ def make_env(
     reward_head_hit: int = 100,
     reward_depth_discount: float = 0.0,
     reward_depth_discount_fn: str = "linear",
+    reward_spider_hit: int = 300,
+    reward_spider_penalty: int = 0,
+    reward_centipede_penalty: int = 0,
 ) -> CentipedeEnv:
     env = CentipedeEnv(
         render_mode=None,
@@ -45,6 +48,9 @@ def make_env(
         reward_head_hit=reward_head_hit,
         reward_depth_discount=reward_depth_discount,
         reward_depth_discount_fn=reward_depth_discount_fn,
+        reward_spider_hit=reward_spider_hit,
+        reward_spider_penalty=reward_spider_penalty,
+        reward_centipede_penalty=reward_centipede_penalty,
     )
     env = Monitor(env)
     env.reset(seed=seed)
@@ -107,6 +113,9 @@ def train(
     reward_head_hit: int = 100,
     reward_depth_discount: float = 0.0,
     reward_depth_discount_fn: str = "linear",
+    reward_spider_hit: int = 300,
+    reward_spider_penalty: int = 0,
+    reward_centipede_penalty: int = 0,
 ) -> None:
     if net_arch is None:
         net_arch = [256, 256]
@@ -129,6 +138,9 @@ def train(
         reward_head_hit=reward_head_hit,
         reward_depth_discount=reward_depth_discount,
         reward_depth_discount_fn=reward_depth_discount_fn,
+        reward_spider_hit=reward_spider_hit,
+        reward_spider_penalty=reward_spider_penalty,
+        reward_centipede_penalty=reward_centipede_penalty,
     )
 
     checkpoint_cb = CheckpointCallback(
@@ -196,6 +208,9 @@ if __name__ == "__main__":
     parser.add_argument("--reward-depth-discount", type=float, default=0.0)
     parser.add_argument("--reward-depth-discount-fn", type=str, default="linear",
                         choices=["linear", "exponential"])
+    parser.add_argument("--reward-spider-hit", type=int, default=300)
+    parser.add_argument("--reward-spider-penalty", type=int, default=0)
+    parser.add_argument("--reward-centipede-penalty", type=int, default=0)
     args = parser.parse_args()
     train(
         total_timesteps=args.timesteps,
@@ -218,4 +233,7 @@ if __name__ == "__main__":
         reward_head_hit=args.reward_head_hit,
         reward_depth_discount=args.reward_depth_discount,
         reward_depth_discount_fn=args.reward_depth_discount_fn,
+        reward_spider_hit=args.reward_spider_hit,
+        reward_spider_penalty=args.reward_spider_penalty,
+        reward_centipede_penalty=args.reward_centipede_penalty,
     )

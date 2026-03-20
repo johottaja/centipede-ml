@@ -2,7 +2,7 @@
 Gymnasium environment for Centipede.
 
 Observation : RGB pixel array  (HEIGHT, WIDTH, 3)  uint8
-Action space: Discrete(10)  – see game.ACTION_* constants
+Action space: Discrete(6)  – see game.ACTION_* constants
 Reward       : score delta per step
 Terminated   : player loses all lives
 """
@@ -31,6 +31,9 @@ class CentipedeEnv(gym.Env):
         reward_head_hit: int = 100,
         reward_depth_discount: float = 0.0,
         reward_depth_discount_fn: str = "linear",
+        reward_spider_hit: int = 300,
+        reward_spider_penalty: int = 0,
+        reward_centipede_penalty: int = 0,
     ):
         super().__init__()
         assert render_mode in (None, "human", "rgb_array"), \
@@ -38,9 +41,9 @@ class CentipedeEnv(gym.Env):
         self.render_mode = render_mode
 
         # Flat grid: COLS*ROWS integers, one per tile.
-        # Values: 0=empty 1=mushroom 2=body 3=head 4=player 5=bullet
+        # Values: 0=empty 1=mushroom 2=body 3=head 4=player 5=bullet 6=spider
         self.observation_space = spaces.Box(
-            low=0, high=5, shape=(COLS * ROWS,), dtype=np.uint8
+            low=0, high=GameEngine.GRID_MAX, shape=(COLS * ROWS,), dtype=np.uint8
         )
         self.action_space = spaces.Discrete(NUM_ACTIONS)
 
@@ -51,7 +54,11 @@ class CentipedeEnv(gym.Env):
             reward_head_hit=reward_head_hit,
             reward_depth_discount=reward_depth_discount,
             reward_depth_discount_fn=reward_depth_discount_fn,
+            reward_spider_hit=reward_spider_hit,
+            reward_spider_penalty=reward_spider_penalty,
+            reward_centipede_penalty=reward_centipede_penalty,
         )
+        self._obs_buf = np.zeros(COLS * ROWS, dtype=np.uint8)
         self._surf: pygame.Surface | None = None   # off-screen surface
         self._window: pygame.Surface | None = None  # on-screen window (human mode)
         self._clock: pygame.time.Clock | None = None
@@ -59,6 +66,9 @@ class CentipedeEnv(gym.Env):
 
     # ------------------------------------------------------------------
     def _init_pygame(self):
+        """Initialise pygame and allocate surfaces. No-op when headless."""
+        if self.render_mode is None:
+            return
         if not pygame.get_init():
             pygame.init()
         if self._font is None:
@@ -79,7 +89,8 @@ class CentipedeEnv(gym.Env):
     ) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
         self._engine.reset(seed=seed)
-        self._init_pygame()
+        if self.render_mode is not None:
+            self._init_pygame()
         return self._get_obs(), {}
 
     # ------------------------------------------------------------------
@@ -90,11 +101,14 @@ class CentipedeEnv(gym.Env):
             "score": self._engine.score,
             "lives": self._engine.player.lives,
             "segments_destroyed": self._engine.segments_destroyed,
+            "spiders_destroyed": self._engine.spiders_destroyed,
         }
         return obs, float(reward), terminated, truncated, info
 
     # ------------------------------------------------------------------
     def render(self) -> np.ndarray | None:
+        if self.render_mode is None:
+            return None
         self._init_pygame()
         self._engine.render(self._surf, self._font)
 
@@ -120,4 +134,5 @@ class CentipedeEnv(gym.Env):
 
     # ------------------------------------------------------------------
     def _get_obs(self) -> np.ndarray:
-        return np.array(self._engine.get_grid_obs(), dtype=np.uint8)
+        self._engine.get_grid_obs(out=self._obs_buf)
+        return self._obs_buf.copy()
