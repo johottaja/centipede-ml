@@ -566,6 +566,118 @@ class GameEngine:
     GRID_SPIDER = 6
     GRID_MAX = 6  # highest value in the encoding (used by env observation_space)
 
+    # ------------------------------------------------------------------
+    # Relative / entity-centric observation
+    #
+    # Layout (95 float32 values):
+    #   [0 .. 83]  12 centipede segment slots × 7 features each:
+    #                rel_x, rel_y, vel_x, vel_y, is_alive, is_head, dist_to_obstacle
+    #   [84 .. 86] bullet: rel_x, rel_y, is_alive
+    #   [87 .. 94] 8-way lidar distances from the player
+    #              order: N, NE, E, SE, S, SW, W, NW
+    _SEG_FEATURES = 7
+    _LIDAR_DIRS: list[tuple[int, int]] = [
+        (0, -1), (1, -1), (1, 0), (1, 1),
+        (0,  1), (-1, 1), (-1, 0), (-1, -1),
+    ]
+    RELATIVE_OBS_SIZE = CENTIPEDE_LENGTH * _SEG_FEATURES + 3 + len(_LIDAR_DIRS)  # 95
+
+    def _seg_obstacle_dist(self, seg: "Segment") -> float:
+        """Horizontal distance in tiles to the next wall/mushroom in seg.dir.
+
+        Returns 0.0 while the segment is dropping (moving vertically).
+        Normalised by COLS so the result is in (0, 1].
+        """
+        if seg.dropping > 0:
+            return 0.0
+        col = seg.col
+        row = seg.row
+        d = seg.dir  # +1 or -1
+        steps = 0
+        c = col
+        while steps < COLS:
+            c += d
+            steps += 1
+            if c < 0 or c >= COLS:
+                break
+            if self.field.get(c, row) is not None:
+                break
+        return steps / float(COLS)
+
+    def get_relative_obs(self, out: np.ndarray | None = None) -> np.ndarray:
+        """Build the entity-centric feature vector and return it.
+
+        *out* must be a contiguous float32 array of length RELATIVE_OBS_SIZE
+        when provided; passing a pre-allocated buffer avoids heap allocation.
+        """
+        if out is None:
+            out = np.zeros(self.RELATIVE_OBS_SIZE, dtype=np.float32)
+        else:
+            out[:] = 0.0
+
+        px = float(self.player.x)
+        py = float(self.player.y)
+        pcol = int(self.player.x) // TILE
+        prow = int(self.player.y) // TILE
+
+        # Collect every live segment across all chains (total ≤ CENTIPEDE_LENGTH)
+        all_segs: list[Segment] = []
+        for chain in self.centipedes:
+            all_segs.extend(chain.segments)
+
+        offset = 0
+        for i in range(CENTIPEDE_LENGTH):
+            if i < len(all_segs):
+                seg = all_segs[i]
+                rel_x = (seg.x - px) / WIDTH
+                rel_y = (seg.y - py) / HEIGHT
+                if seg.dropping > 0:
+                    vel_x = 0.0
+                    vel_y = float(seg.vdir)   # ±1 while falling
+                else:
+                    vel_x = float(seg.dir)    # ±1 while traversing
+                    vel_y = 0.0
+                out[offset]     = rel_x
+                out[offset + 1] = rel_y
+                out[offset + 2] = vel_x
+                out[offset + 3] = vel_y
+                out[offset + 4] = 1.0                             # is_alive
+                out[offset + 5] = 1.0 if seg.is_head else 0.0    # is_head
+                out[offset + 6] = self._seg_obstacle_dist(seg)
+            # unoccupied slot stays all-zero (is_alive = 0)
+            offset += self._SEG_FEATURES
+
+        # Bullet
+        if self.bullets:
+            b = self.bullets[0]
+            out[offset]     = (b.x - px) / WIDTH
+            out[offset + 1] = (b.y - py) / HEIGHT
+            out[offset + 2] = 1.0  # is_alive
+        offset += 3
+
+        # 8-way lidar from player tile
+        spider_tiles: set[tuple[int, int]] = {
+            (int(s.x) // TILE, int(s.y) // TILE)
+            for s in self._spider_mgr.spiders
+        }
+        max_dist = float(max(COLS, ROWS))
+        for d_idx, (dc, dr) in enumerate(self._LIDAR_DIRS):
+            c, r = pcol, prow
+            steps = 0
+            while True:
+                c += dc
+                r += dr
+                steps += 1
+                if c < 0 or c >= COLS or r < 0 or r >= ROWS:
+                    break
+                if self.field.get(c, r) is not None:
+                    break
+                if (c, r) in spider_tiles:
+                    break
+            out[offset + d_idx] = steps / max_dist
+
+        return out
+
     def get_grid_obs(self, out: np.ndarray | None = None) -> np.ndarray:
         """Write the game grid into *out* (or a fresh array) and return it.
 

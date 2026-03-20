@@ -1,7 +1,12 @@
 """
 Gymnasium environment for Centipede.
 
-Observation : RGB pixel array  (HEIGHT, WIDTH, 3)  uint8
+Observation : entity-centric float32 vector of length RELATIVE_OBS_SIZE (95)
+              Layout:
+                [0..83]  12 centipede segment slots × 7 features
+                         (rel_x, rel_y, vel_x, vel_y, is_alive, is_head, dist_to_obstacle)
+                [84..86] bullet (rel_x, rel_y, is_alive)
+                [87..94] 8-way lidar distances from player (N,NE,E,SE,S,SW,W,NW)
 Action space: Discrete(6)  – see game.ACTION_* constants
 Reward       : score delta per step
 Terminated   : player loses all lives
@@ -15,7 +20,7 @@ from gymnasium import spaces
 
 from core.game import (
     GameEngine,
-    WIDTH, HEIGHT, NUM_ACTIONS, COLS, ROWS,
+    WIDTH, HEIGHT, NUM_ACTIONS,
 )
 
 
@@ -40,10 +45,12 @@ class CentipedeEnv(gym.Env):
             f"Unsupported render_mode: {render_mode}"
         self.render_mode = render_mode
 
-        # Flat grid: COLS*ROWS integers, one per tile.
-        # Values: 0=empty 1=mushroom 2=body 3=head 4=player 5=bullet 6=spider
+        # Entity-centric float32 vector; see module docstring for layout.
         self.observation_space = spaces.Box(
-            low=0, high=GameEngine.GRID_MAX, shape=(COLS * ROWS,), dtype=np.uint8
+            low=-np.inf,
+            high=np.inf,
+            shape=(GameEngine.RELATIVE_OBS_SIZE,),
+            dtype=np.float32,
         )
         self.action_space = spaces.Discrete(NUM_ACTIONS)
 
@@ -58,7 +65,7 @@ class CentipedeEnv(gym.Env):
             reward_spider_penalty=reward_spider_penalty,
             reward_centipede_penalty=reward_centipede_penalty,
         )
-        self._obs_buf = np.zeros(COLS * ROWS, dtype=np.uint8)
+        self._obs_buf = np.zeros(GameEngine.RELATIVE_OBS_SIZE, dtype=np.float32)
         self._surf: pygame.Surface | None = None   # off-screen surface
         self._window: pygame.Surface | None = None  # on-screen window (human mode)
         self._clock: pygame.time.Clock | None = None
@@ -134,5 +141,5 @@ class CentipedeEnv(gym.Env):
 
     # ------------------------------------------------------------------
     def _get_obs(self) -> np.ndarray:
-        self._engine.get_grid_obs(out=self._obs_buf)
+        self._engine.get_relative_obs(out=self._obs_buf)
         return self._obs_buf.copy()
