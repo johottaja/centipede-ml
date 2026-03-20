@@ -1,7 +1,11 @@
+import json
+import os
 import tkinter as tk
 from tkinter import ttk
 
 from .tooltip import make_tooltip
+
+SETTINGS_PATH = "settings.json"
 
 # Each entry is either:
 #   ("section", "Section Title")                          — a visual divider/header
@@ -49,6 +53,7 @@ class HParamPanel(tk.Frame):
         super().__init__(parent)
         self._vars: dict[str, tk.StringVar] = {}
         self._build()
+        self.load()
 
     def _build(self) -> None:
         canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
@@ -104,6 +109,26 @@ class HParamPanel(tk.Frame):
     def reset_defaults(self) -> None:
         for _label, key, default, *_ in FIELD_SPECS:
             self._vars[key].set(default)
+
+    def save(self, path: str = SETTINGS_PATH) -> None:
+        data = {key: var.get() for key, var in self._vars.items()}
+        try:
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+        except OSError:
+            pass
+
+    def load(self, path: str = SETTINGS_PATH) -> None:
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+        for key, value in data.items():
+            if key in self._vars:
+                self._vars[key].set(str(value))
 
     def get_args(self) -> list[str]:
         """Validate all entries and return a flat CLI arg list for core/train.py.
