@@ -1,9 +1,9 @@
 """
-Train a DQN agent on Centipede using Stable-Baselines3.
+Train a PPO agent on Centipede using Stable-Baselines3.
 
 Observation: flat grid vector of length COLS*ROWS (930 ints, values 0-5).
 Policy: MlpPolicy (two hidden layers).
-The trained model is saved to models/dqn_centipede.zip.
+The trained model is saved to models/ppo_centipede.zip.
 
 Progress is emitted to stdout as newline-delimited JSON objects:
   {"type": "progress", "steps": N, "total": T, "pct": P, "elapsed": S, "eta": S, "steps_per_sec": F}
@@ -18,14 +18,14 @@ import os
 import time
 
 import torch
-from stable_baselines3 import DQN
+from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
 
 from core.env import CentipedeEnv
 
 MODEL_DIR = "models"
-MODEL_PATH = os.path.join(MODEL_DIR, "dqn_centipede")
+MODEL_PATH = os.path.join(MODEL_DIR, "ppo_centipede")
 
 
 def make_env(
@@ -95,17 +95,16 @@ class ProgressCallback(BaseCallback):
 def train(
     total_timesteps: int = 1_000_000,
     seed: int = 0,
-    learning_rate: float = 1e-4,
-    buffer_size: int = 100_000,
-    learning_starts: int = 10_000,
+    learning_rate: float = 3e-4,
+    n_steps: int = 2048,
     batch_size: int = 64,
-    tau: float = 1.0,
+    n_epochs: int = 10,
     gamma: float = 0.99,
-    train_freq: int = 4,
-    gradient_steps: int = 1,
-    target_update_interval: int = 1_000,
-    exploration_fraction: float = 0.1,
-    exploration_final_eps: float = 0.01,
+    gae_lambda: float = 0.95,
+    clip_range: float = 0.2,
+    ent_coef: float = 0.01,
+    vf_coef: float = 0.5,
+    max_grad_norm: float = 0.5,
     net_arch: list[int] | None = None,
     reward_mushroom_hit: int = 1,
     reward_mushroom_destroy: int = 5,
@@ -146,25 +145,24 @@ def train(
     checkpoint_cb = CheckpointCallback(
         save_freq=100_000,
         save_path=MODEL_DIR,
-        name_prefix="dqn_centipede_ckpt",
+        name_prefix="ppo_centipede_ckpt",
         verbose=1,
     )
     progress_cb = ProgressCallback(total_timesteps)
 
-    model = DQN(
+    model = PPO(
         policy="MlpPolicy",
         env=env,
         learning_rate=learning_rate,
-        buffer_size=buffer_size,
-        learning_starts=learning_starts,
+        n_steps=n_steps,
         batch_size=batch_size,
-        tau=tau,
+        n_epochs=n_epochs,
         gamma=gamma,
-        train_freq=train_freq,
-        gradient_steps=gradient_steps,
-        target_update_interval=target_update_interval,
-        exploration_fraction=exploration_fraction,
-        exploration_final_eps=exploration_final_eps,
+        gae_lambda=gae_lambda,
+        clip_range=clip_range,
+        ent_coef=ent_coef,
+        vf_coef=vf_coef,
+        max_grad_norm=max_grad_norm,
         policy_kwargs={"net_arch": net_arch},
         device=device,
         verbose=0,
@@ -188,17 +186,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--timesteps", type=int, default=1_000_000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--buffer-size", type=int, default=100_000)
-    parser.add_argument("--learning-starts", type=int, default=10_000)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--n-steps", type=int, default=2048)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--tau", type=float, default=1.0)
+    parser.add_argument("--n-epochs", type=int, default=10)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--train-freq", type=int, default=4)
-    parser.add_argument("--gradient-steps", type=int, default=1)
-    parser.add_argument("--target-update-interval", type=int, default=1_000)
-    parser.add_argument("--exploration-fraction", type=float, default=0.1)
-    parser.add_argument("--exploration-final-eps", type=float, default=0.01)
+    parser.add_argument("--gae-lambda", type=float, default=0.95)
+    parser.add_argument("--clip-range", type=float, default=0.2)
+    parser.add_argument("--ent-coef", type=float, default=0.01)
+    parser.add_argument("--vf-coef", type=float, default=0.5)
+    parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--net-arch", type=str, default="256,256",
                         help="Comma-separated hidden layer sizes, e.g. 256,256")
     parser.add_argument("--reward-mushroom-hit", type=int, default=1)
@@ -216,16 +213,15 @@ if __name__ == "__main__":
         total_timesteps=args.timesteps,
         seed=args.seed,
         learning_rate=args.learning_rate,
-        buffer_size=args.buffer_size,
-        learning_starts=args.learning_starts,
+        n_steps=args.n_steps,
         batch_size=args.batch_size,
-        tau=args.tau,
+        n_epochs=args.n_epochs,
         gamma=args.gamma,
-        train_freq=args.train_freq,
-        gradient_steps=args.gradient_steps,
-        target_update_interval=args.target_update_interval,
-        exploration_fraction=args.exploration_fraction,
-        exploration_final_eps=args.exploration_final_eps,
+        gae_lambda=args.gae_lambda,
+        clip_range=args.clip_range,
+        ent_coef=args.ent_coef,
+        vf_coef=args.vf_coef,
+        max_grad_norm=args.max_grad_norm,
         net_arch=[int(x) for x in args.net_arch.split(",")],
         reward_mushroom_hit=args.reward_mushroom_hit,
         reward_mushroom_destroy=args.reward_mushroom_destroy,

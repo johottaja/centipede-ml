@@ -1,5 +1,5 @@
 """
-Watch the trained DQN agent play Centipede.
+Watch the trained PPO agent play Centipede.
 
 Usage:
     uv run python watch.py [--model PATH] [--episodes N] [--fps N]
@@ -10,7 +10,7 @@ import argparse
 import os
 
 import pygame
-from stable_baselines3 import DQN
+from stable_baselines3 import PPO
 
 from core.env import CentipedeEnv
 from core.game import WIDTH, HEIGHT
@@ -22,14 +22,14 @@ def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> Non
         print(f"No model found at {model_path}.zip — train first.")
         return
 
-    model = DQN.load(model_path)
+    model = PPO.load(model_path)
     print(f"Loaded model from {model_path}.zip")
 
     proc_env = make_env()
 
     pygame.init()
     window = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Centipede – DQN Agent")
+    pygame.display.set_caption("Centipede – PPO Agent")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("monospace", 16)
     surf = pygame.Surface((WIDTH, HEIGHT))
