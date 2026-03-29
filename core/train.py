@@ -1,7 +1,7 @@
 """
 Train a DQN agent on Centipede using Stable-Baselines3.
 
-Observation: flat grid vector of length COLS*ROWS (930 ints, values 0-5).
+Observation: entity-centric float32 vector of length RELATIVE_OBS_SIZE (105).
 Policy: MlpPolicy (two hidden layers).
 The trained model is saved to models/dqn_centipede.zip.
 
@@ -21,6 +21,7 @@ import torch
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 
 from core.env import CentipedeEnv
 
@@ -28,7 +29,7 @@ MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "dqn_centipede")
 
 
-def make_env(
+def _make_env_fn(
     seed: int = 0,
     reward_mushroom_hit: int = 1,
     reward_mushroom_destroy: int = 5,
@@ -37,11 +38,43 @@ def make_env(
     reward_depth_discount: float = 0.0,
     reward_depth_discount_fn: str = "linear",
     reward_spider_hit: int = 300,
-    reward_spider_penalty: int = 0,
-    reward_centipede_penalty: int = 0,
-) -> CentipedeEnv:
-    env = CentipedeEnv(
-        render_mode=None,
+    reward_spider_penalty: int = 1000,
+    reward_centipede_penalty: int = 1000,
+):
+    """Return a thunk that creates and seeds one monitored env (for VecEnv factories)."""
+    def _thunk():
+        env = CentipedeEnv(
+            render_mode=None,
+            reward_mushroom_hit=reward_mushroom_hit,
+            reward_mushroom_destroy=reward_mushroom_destroy,
+            reward_body_hit=reward_body_hit,
+            reward_head_hit=reward_head_hit,
+            reward_depth_discount=reward_depth_discount,
+            reward_depth_discount_fn=reward_depth_discount_fn,
+            reward_spider_hit=reward_spider_hit,
+            reward_spider_penalty=reward_spider_penalty,
+            reward_centipede_penalty=reward_centipede_penalty,
+        )
+        env = Monitor(env)
+        env.reset(seed=seed)
+        return env
+    return _thunk
+
+
+def make_vec_env(
+    n_envs: int = 1,
+    seed: int = 0,
+    reward_mushroom_hit: int = 1,
+    reward_mushroom_destroy: int = 5,
+    reward_body_hit: int = 10,
+    reward_head_hit: int = 100,
+    reward_depth_discount: float = 0.0,
+    reward_depth_discount_fn: str = "linear",
+    reward_spider_hit: int = 300,
+    reward_spider_penalty: int = 1000,
+    reward_centipede_penalty: int = 1000,
+):
+    kwargs = dict(
         reward_mushroom_hit=reward_mushroom_hit,
         reward_mushroom_destroy=reward_mushroom_destroy,
         reward_body_hit=reward_body_hit,
@@ -52,9 +85,10 @@ def make_env(
         reward_spider_penalty=reward_spider_penalty,
         reward_centipede_penalty=reward_centipede_penalty,
     )
-    env = Monitor(env)
-    env.reset(seed=seed)
-    return env
+    fns = [_make_env_fn(seed=seed + i, **kwargs) for i in range(n_envs)]
+    if n_envs == 1:
+        return DummyVecEnv(fns)
+    return SubprocVecEnv(fns, start_method="fork")
 
 
 def _emit(obj: dict) -> None:
@@ -94,6 +128,7 @@ class ProgressCallback(BaseCallback):
 
 def train(
     total_timesteps: int = 1_000_000,
+    n_envs: int = 4,
     seed: int = 0,
     learning_rate: float = 1e-4,
     buffer_size: int = 100_000,
@@ -114,8 +149,8 @@ def train(
     reward_depth_discount: float = 0.0,
     reward_depth_discount_fn: str = "linear",
     reward_spider_hit: int = 300,
-    reward_spider_penalty: int = 0,
-    reward_centipede_penalty: int = 0,
+    reward_spider_penalty: int = 1000,
+    reward_centipede_penalty: int = 1000,
 ) -> None:
     if net_arch is None:
         net_arch = [256, 256]
@@ -130,7 +165,8 @@ def train(
         device = "cpu"
     _emit({"type": "device", "device": device})
 
-    env = make_env(
+    env = make_vec_env(
+        n_envs=n_envs,
         seed=seed,
         reward_mushroom_hit=reward_mushroom_hit,
         reward_mushroom_destroy=reward_mushroom_destroy,
@@ -187,6 +223,7 @@ def train(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--timesteps", type=int, default=1_000_000)
+    parser.add_argument("--n-envs", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--buffer-size", type=int, default=100_000)
@@ -209,11 +246,12 @@ if __name__ == "__main__":
     parser.add_argument("--reward-depth-discount-fn", type=str, default="linear",
                         choices=["linear", "exponential"])
     parser.add_argument("--reward-spider-hit", type=int, default=300)
-    parser.add_argument("--reward-spider-penalty", type=int, default=0)
-    parser.add_argument("--reward-centipede-penalty", type=int, default=0)
+    parser.add_argument("--reward-spider-penalty", type=int, default=1000)
+    parser.add_argument("--reward-centipede-penalty", type=int, default=1000)
     args = parser.parse_args()
     train(
         total_timesteps=args.timesteps,
+        n_envs=args.n_envs,
         seed=args.seed,
         learning_rate=args.learning_rate,
         buffer_size=args.buffer_size,

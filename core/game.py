@@ -360,8 +360,8 @@ class GameEngine:
         reward_depth_discount: float = 0.0,
         reward_depth_discount_fn: str = "linear",
         reward_spider_hit: int = 300,
-        reward_spider_penalty: int = 0,
-        reward_centipede_penalty: int = 0,
+        reward_spider_penalty: int = 1000,
+        reward_centipede_penalty: int = 1000,
     ):
         self._rng = random.Random(seed)
         self._font = None  # initialised lazily so pygame.font is optional

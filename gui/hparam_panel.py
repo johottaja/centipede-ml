@@ -14,6 +14,7 @@ SETTINGS_PATH = "settings.json"
 SPECS: list[tuple] = [
     ("section", "Training"),
     ("Timesteps",              "timesteps",              "100000", "int",   1,    None, "Total environment steps to train for"),
+    ("Parallel envs",          "n-envs",                 "4",       "int",   1,    None, "Number of parallel environments (SubprocVecEnv); more envs = faster experience collection"),
     ("Seed",                   "seed",                   "0",       "int",   0,    None, "Random seed for reproducibility"),
 
     ("section", "DQN"),
@@ -38,8 +39,8 @@ SPECS: list[tuple] = [
     ("Depth discount",         "reward-depth-discount",   "0.0",    "float", 0,    1,    "Fraction by which hit rewards are reduced at the bottom row (0 = disabled, 1 = zero reward at bottom)"),
     ("Depth discount fn",      "reward-depth-discount-fn","linear", "choice", ["linear", "exponential"], None, "Shape of the depth discount curve"),
     ("Spider hit",             "reward-spider-hit",        "300",    "int",   0,    None, "Reward for shooting a spider"),
-    ("Spider collision penalty","reward-spider-penalty",   "0",      "int",   0,    None, "Penalty (subtracted) when a spider touches the player"),
-    ("Centipede collision penalty","reward-centipede-penalty","0",   "int",   0,    None, "Penalty (subtracted) when a centipede segment touches the player"),
+    ("Spider collision penalty","reward-spider-penalty",   "1000",   "int",   0,    None, "Penalty (subtracted) when a spider touches the player"),
+    ("Centipede collision penalty","reward-centipede-penalty","1000","int",   0,    None, "Penalty (subtracted) when a centipede segment touches the player"),
 ]
 
 # Only the field entries (not section headers) — used for validation and reset

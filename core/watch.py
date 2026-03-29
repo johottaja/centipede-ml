@@ -14,7 +14,7 @@ from stable_baselines3 import DQN
 
 from core.env import CentipedeEnv
 from core.game import WIDTH, HEIGHT
-from core.train import MODEL_PATH, make_env
+from core.train import MODEL_PATH, _make_env_fn
 
 
 def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> None:
@@ -25,7 +25,7 @@ def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> Non
     model = DQN.load(model_path)
     print(f"Loaded model from {model_path}.zip")
 
-    proc_env = make_env()
+    proc_env = _make_env_fn(seed=0)()
 
     pygame.init()
     window = pygame.display.set_mode((WIDTH, HEIGHT))

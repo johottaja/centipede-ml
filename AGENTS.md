@@ -52,7 +52,7 @@ Reward values are constructor params (also settable per-run from the GUI):
 
 Standard `gymnasium.Env` wrapper.
 
-- **Observation space:** `Box(low=0, high=5, shape=(930,), dtype=uint8)` — flat 30×31 grid where each cell encodes: `0`=empty, `1`=mushroom, `2`=body, `3`=head, `4`=player, `5`=bullet
+- **Observation space:** `Box(low=-inf, high=inf, shape=(105,), dtype=float32)` — entity-centric vector (see `core/game.py` docstring for full layout: 12 segment slots × 7 features, bullet × 3, 2 spider slots × 5 features, 8-way lidar)
 - **Action space:** `Discrete(6)` — NOOP / LEFT / RIGHT / UP / DOWN / FIRE
 - **Reward:** score delta per step
 - **Terminated:** player loses all 3 lives
@@ -62,8 +62,10 @@ Standard `gymnasium.Env` wrapper.
 
 ## core/train.py — DQN Training
 
-Runs `DQN` (MlpPolicy, default `[256, 256]`) via Stable-Baselines3.  
+Runs `DQN` (MlpPolicy, default `[256, 256]`) via Stable-Baselines3. 
 Spawned as a subprocess by the GUI; communicates progress via newline-delimited JSON on stdout.
+
+Uses `SubprocVecEnv` (default 4 parallel workers) to collect experience concurrently across multiple processes, keeping the GPU fed. Falls back to `DummyVecEnv` when `n_envs=1`.
 
 **Callbacks:**
 - `CheckpointCallback` — saves `models/dqn_centipede_ckpt_<N>_steps.zip` every 100k steps

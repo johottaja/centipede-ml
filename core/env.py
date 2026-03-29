@@ -40,8 +40,8 @@ class CentipedeEnv(gym.Env):
         reward_depth_discount: float = 0.0,
         reward_depth_discount_fn: str = "linear",
         reward_spider_hit: int = 300,
-        reward_spider_penalty: int = 0,
-        reward_centipede_penalty: int = 0,
+        reward_spider_penalty: int = 1000,
+        reward_centipede_penalty: int = 1000,
     ):
         super().__init__()
         assert render_mode in (None, "human", "rgb_array"), \
