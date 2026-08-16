@@ -7,6 +7,7 @@ The trained model is saved to models/dqn_centipede.zip.
 
 Progress is emitted to stdout as newline-delimited JSON objects:
   {"type": "progress", "steps": N, "total": T, "pct": P, "elapsed": S, "eta": S, "steps_per_sec": F}
+  {"type": "eval", "steps": N, "episodes": [...], "mean_score": S}
   {"type": "done", "elapsed": S}
   {"type": "error", "message": "..."}
 """
@@ -20,6 +21,7 @@ import time
 import torch
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 
@@ -107,6 +109,48 @@ def _emit(obj: dict) -> None:
     print(json.dumps(obj), flush=True)
 
 
+def _run_parallel_eval(
+    model: DQN,
+    n_eval_episodes: int,
+    env_kwargs: dict,
+    seed: int,
+    timesteps: int,
+) -> list[dict]:
+    """Run eval episodes in parallel via SubprocVecEnv (one env per episode)."""
+    eval_env = make_vec_env(
+        n_envs=n_eval_episodes,
+        seed=seed + timesteps,
+        **env_kwargs,
+    )
+    episodes: list[dict] = []
+
+    def _callback(locals_: dict, globals_: dict) -> None:
+        if not locals_["done"]:
+            return
+        info = locals_["info"]
+        if "episode" not in info:
+            return
+        episodes.append({
+            "score": round(float(info.get("score", info["episode"]["r"])), 1),
+            "segments_destroyed": int(info.get("segments_destroyed", 0)),
+            "spiders_destroyed": int(info.get("spiders_destroyed", 0)),
+        })
+
+    try:
+        evaluate_policy(
+            model,
+            eval_env,
+            n_eval_episodes=n_eval_episodes,
+            deterministic=True,
+            callback=_callback,
+            warn=False,
+        )
+    finally:
+        eval_env.close()
+
+    return episodes
+
+
 class ProgressCallback(BaseCallback):
     def __init__(self, total_timesteps: int, emit_freq: int = 5_000):
         super().__init__()
@@ -136,6 +180,48 @@ class ProgressCallback(BaseCallback):
                 "steps_per_sec": round(sps, 1),
             })
         return True
+
+
+class EvalProgressCallback(BaseCallback):
+    """Run deterministic eval episodes in parallel and emit results to stdout."""
+
+    def __init__(
+        self,
+        eval_freq: int,
+        n_eval_episodes: int,
+        env_kwargs: dict,
+        seed: int = 0,
+    ):
+        super().__init__()
+        self.eval_freq = eval_freq
+        self.n_eval_episodes = n_eval_episodes
+        self.env_kwargs = env_kwargs
+        self.seed = seed
+        self._next_eval = eval_freq
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps >= self._next_eval:
+            self._run_eval()
+            self._next_eval += self.eval_freq
+        return True
+
+    def _run_eval(self) -> None:
+        episodes = _run_parallel_eval(
+            self.model,
+            self.n_eval_episodes,
+            self.env_kwargs,
+            self.seed,
+            self.num_timesteps,
+        )
+        mean_score = round(
+            sum(ep["score"] for ep in episodes) / max(1, len(episodes)), 1
+        )
+        _emit({
+            "type": "eval",
+            "steps": self.num_timesteps,
+            "episodes": episodes,
+            "mean_score": mean_score,
+        })
 
 
 def train(
@@ -196,6 +282,20 @@ def train(
         reward_proximity_penalty=reward_proximity_penalty,
         proximity_distance_tiles=proximity_distance_tiles,
     )
+    env_kwargs = dict(
+        reward_mushroom_hit=reward_mushroom_hit,
+        reward_mushroom_destroy=reward_mushroom_destroy,
+        reward_body_hit=reward_body_hit,
+        reward_head_hit=reward_head_hit,
+        reward_depth_discount=reward_depth_discount,
+        reward_depth_discount_fn=reward_depth_discount_fn,
+        reward_spider_hit=reward_spider_hit,
+        reward_spider_penalty=reward_spider_penalty,
+        reward_centipede_penalty=reward_centipede_penalty,
+        reward_survival=reward_survival,
+        reward_proximity_penalty=reward_proximity_penalty,
+        proximity_distance_tiles=proximity_distance_tiles,
+    )
 
     checkpoint_cb = CheckpointCallback(
         save_freq=100_000,
@@ -204,6 +304,12 @@ def train(
         verbose=1,
     )
     progress_cb = ProgressCallback(total_timesteps)
+    eval_cb = EvalProgressCallback(
+        eval_freq=100_000,
+        n_eval_episodes=10,
+        env_kwargs=env_kwargs,
+        seed=seed,
+    )
 
     model = DQN(
         policy="MlpPolicy",
@@ -229,7 +335,7 @@ def train(
     t0 = time.monotonic()
     model.learn(
         total_timesteps=total_timesteps,
-        callback=[checkpoint_cb, progress_cb],
+        callback=[checkpoint_cb, progress_cb, eval_cb],
         progress_bar=False,
     )
 

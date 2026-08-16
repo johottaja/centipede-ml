@@ -26,6 +26,119 @@ def _fmt_seconds(s: float) -> str:
     return f"{sec}s"
 
 
+def _fmt_steps(steps: int) -> str:
+    if steps >= 1_000_000:
+        return f"{steps / 1_000_000:.1f}M"
+    if steps >= 1_000:
+        return f"{steps / 1_000:.0f}k"
+    return str(steps)
+
+
+class EvalScoreChart(tk.Canvas):
+    """Simple line chart for eval mean scores over training steps."""
+
+    _MARGIN_LEFT = 52
+    _MARGIN_RIGHT = 12
+    _MARGIN_TOP = 16
+    _MARGIN_BOTTOM = 28
+
+    def __init__(self, parent: tk.Widget, width: int = 420, height: int = 180, **kwargs):
+        super().__init__(
+            parent,
+            width=width,
+            height=height,
+            bg="white",
+            highlightthickness=1,
+            highlightbackground="#cccccc",
+            **kwargs,
+        )
+        self._points: list[tuple[int, float]] = []
+        self.bind("<Configure>", self._on_resize)
+
+    def add_point(self, steps: int, mean_score: float) -> None:
+        self._points.append((steps, mean_score))
+        self._redraw()
+
+    def _on_resize(self, _event: tk.Event) -> None:
+        self._redraw()
+
+    def _redraw(self) -> None:
+        self.delete("all")
+        w = max(self.winfo_width(), 1)
+        h = max(self.winfo_height(), 1)
+
+        plot_l = self._MARGIN_LEFT
+        plot_r = w - self._MARGIN_RIGHT
+        plot_t = self._MARGIN_TOP
+        plot_b = h - self._MARGIN_BOTTOM
+        plot_w = max(plot_r - plot_l, 1)
+        plot_h = max(plot_b - plot_t, 1)
+
+        self.create_text(
+            w // 2, 8,
+            text="Eval score (10-game avg, deterministic)",
+            font=("TkDefaultFont", 9, "bold"),
+            fill="#333333",
+        )
+
+        if not self._points:
+            self.create_text(
+                w // 2, (plot_t + plot_b) // 2,
+                text="Waiting for first evaluation at 100k steps…",
+                font=("TkDefaultFont", 9),
+                fill="#888888",
+            )
+            return
+
+        scores = [p[1] for p in self._points]
+        y_min = min(scores)
+        y_max = max(scores)
+        if y_min == y_max:
+            y_min -= 1.0
+            y_max += 1.0
+        pad = (y_max - y_min) * 0.1 or 1.0
+        y_min -= pad
+        y_max += pad
+
+        steps_min = self._points[0][0]
+        steps_max = self._points[-1][0]
+        if steps_min == steps_max:
+            steps_max = steps_min + 1
+
+        def x_pos(steps: int) -> float:
+            return plot_l + (steps - steps_min) / (steps_max - steps_min) * plot_w
+
+        def y_pos(score: float) -> float:
+            return plot_b - (score - y_min) / (y_max - y_min) * plot_h
+
+        # Axes
+        self.create_line(plot_l, plot_t, plot_l, plot_b, fill="#999999")
+        self.create_line(plot_l, plot_b, plot_r, plot_b, fill="#999999")
+
+        # Y-axis labels (min, mid, max)
+        for val in (y_min, (y_min + y_max) / 2, y_max):
+            y = y_pos(val)
+            self.create_line(plot_l - 3, y, plot_l, y, fill="#999999")
+            label = f"{val:,.0f}" if abs(val) >= 10 else f"{val:.1f}"
+            self.create_text(plot_l - 6, y, text=label, anchor="e", font=("TkDefaultFont", 8), fill="#666666")
+
+        # X-axis labels (first, last step)
+        for steps in (steps_min, steps_max):
+            x = x_pos(steps)
+            self.create_line(x, plot_b, x, plot_b + 3, fill="#999999")
+            self.create_text(x, plot_b + 10, text=_fmt_steps(steps), font=("TkDefaultFont", 8), fill="#666666")
+
+        # Data line and points
+        coords: list[float] = []
+        for steps, score in self._points:
+            coords.extend((x_pos(steps), y_pos(score)))
+        if len(coords) >= 4:
+            self.create_line(*coords, fill="#2563eb", width=2, smooth=False)
+        for steps, score in self._points:
+            x, y = x_pos(steps), y_pos(score)
+            self.create_oval(x - 3, y - 3, x + 3, y + 3, fill="#2563eb", outline="#1d4ed8")
+
+
 class ProgressWindow(tk.Toplevel):
     """Modal-ish window that shows live DQN training progress."""
 
@@ -34,7 +147,8 @@ class ProgressWindow(tk.Toplevel):
     def __init__(self, parent: tk.Tk, cmd: list[str], on_done: Callable[[], None]):
         super().__init__(parent)
         self.title("Training in progress")
-        self.resizable(False, False)
+        self.resizable(True, True)
+        self.minsize(420, 520)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._cmd = cmd
@@ -58,21 +172,22 @@ class ProgressWindow(tk.Toplevel):
         tk.Label(outer, text="Training DQN Agent", font=("TkDefaultFont", 13, "bold")).pack(pady=(0, 16))
 
         self._progress_bar = ttk.Progressbar(outer, length=360, mode="determinate", maximum=100)
-        self._progress_bar.pack(pady=(0, 14))
+        self._progress_bar.pack(fill="x", pady=(0, 14))
 
         grid = tk.Frame(outer)
-        grid.pack(fill="x", pady=(0, 16))
+        grid.pack(fill="x", pady=(0, 12))
 
         self._stat_vars: dict[str, tk.StringVar] = {}
         rows = [
-            ("Status",         "status",    "Starting…"),
-            ("Device",         "device",    "—"),
-            ("Steps done",     "steps",     "—"),
-            ("Steps remaining","remaining", "—"),
-            ("Progress",       "pct",       "0 %"),
-            ("Elapsed",        "elapsed",   "—"),
-            ("ETA",            "eta",       "—"),
-            ("Steps / sec",    "sps",       "—"),
+            ("Status",          "status",     "Starting…"),
+            ("Device",          "device",     "—"),
+            ("Steps done",      "steps",      "—"),
+            ("Steps remaining", "remaining",  "—"),
+            ("Progress",        "pct",        "0 %"),
+            ("Elapsed",         "elapsed",    "—"),
+            ("ETA",             "eta",        "—"),
+            ("Steps / sec",     "sps",        "—"),
+            ("Eval score",      "eval_score", "—"),
         ]
         for i, (label, key, initial) in enumerate(rows):
             tk.Label(grid, text=label, anchor="w", width=18,
@@ -81,6 +196,9 @@ class ProgressWindow(tk.Toplevel):
             self._stat_vars[key] = var
             tk.Label(grid, textvariable=var, anchor="w",
                      font=("TkDefaultFont", 10, "bold")).grid(row=i, column=1, sticky="w", padx=(8, 0), pady=2)
+
+        self._chart = EvalScoreChart(outer, height=180)
+        self._chart.pack(fill="both", expand=True, pady=(4, 16))
 
         self._cancel_btn = tk.Button(outer, text="Cancel Training", width=20, command=self._on_close)
         self._cancel_btn.pack(pady=(4, 0))
@@ -146,6 +264,13 @@ class ProgressWindow(tk.Toplevel):
             self._stat_vars["elapsed"].set(_fmt_seconds(msg["elapsed"]))
             self._stat_vars["eta"].set(_fmt_seconds(msg["eta"]))
             self._stat_vars["sps"].set(f"{msg['steps_per_sec']:,.0f}")
+
+        elif t == "eval":
+            mean_score = msg.get("mean_score")
+            steps = msg.get("steps", 0)
+            if mean_score is not None:
+                self._stat_vars["eval_score"].set(f"{mean_score:,.1f}  @ {steps:,} steps")
+                self._chart.add_point(steps, float(mean_score))
 
         elif t == "done":
             self._progress_bar["value"] = 100
