@@ -8,10 +8,11 @@ Observation : entity-centric float32 vector of length RELATIVE_OBS_SIZE (105)
                 [84..86]  bullet (rel_x, rel_y, is_alive)
                 [87..96]  2 spider slots × 5 features
                           (rel_x, rel_y, vel_x, vel_y, is_alive)
-                [97..104] 8-way lidar distances from player — walls + mushrooms only
+                [97..104] 8-way lidar distances from player — walls, mushrooms,
+                          centipede segments, and spiders
                           (N, NE, E, SE, S, SW, W, NW)
 Action space: Discrete(6)  – see game.ACTION_* constants
-Reward       : score delta per step
+Reward       : score delta per step (includes survival bonus and proximity shaping)
 Terminated   : player loses all lives
 """
 from __future__ import annotations
@@ -42,6 +43,9 @@ class CentipedeEnv(gym.Env):
         reward_spider_hit: int = 300,
         reward_spider_penalty: int = 1000,
         reward_centipede_penalty: int = 1000,
+        reward_survival: float = 0.01,
+        reward_proximity_penalty: float = 1.0,
+        proximity_distance_tiles: int = 3,
     ):
         super().__init__()
         assert render_mode in (None, "human", "rgb_array"), \
@@ -67,6 +71,9 @@ class CentipedeEnv(gym.Env):
             reward_spider_hit=reward_spider_hit,
             reward_spider_penalty=reward_spider_penalty,
             reward_centipede_penalty=reward_centipede_penalty,
+            reward_survival=reward_survival,
+            reward_proximity_penalty=reward_proximity_penalty,
+            proximity_distance_tiles=proximity_distance_tiles,
         )
         self._obs_buf = np.zeros(GameEngine.RELATIVE_OBS_SIZE, dtype=np.float32)
         self._surf: pygame.Surface | None = None   # off-screen surface

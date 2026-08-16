@@ -41,6 +41,9 @@ SPECS: list[tuple] = [
     ("Spider hit",             "reward-spider-hit",        "300",    "int",   0,    None, "Reward for shooting a spider"),
     ("Spider collision penalty","reward-spider-penalty",   "1000",   "int",   0,    None, "Penalty (subtracted) when a spider touches the player"),
     ("Centipede collision penalty","reward-centipede-penalty","1000","int",   0,    None, "Penalty (subtracted) when a centipede segment touches the player"),
+    ("Survival bonus",           "reward-survival",          "0.01",   "float", 0,    None, "Reward added every step the player stays alive"),
+    ("Proximity penalty",        "reward-proximity-penalty", "1.0",    "float", 0,    None, "Max penalty per step when a threat is within proximity range (scales linearly with distance)"),
+    ("Proximity range (tiles)",  "proximity-distance-tiles", "3",      "int",   1,    None, "Distance in tiles within which proximity penalty applies"),
 ]
 
 # Only the field entries (not section headers) — used for validation and reset

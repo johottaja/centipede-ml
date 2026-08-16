@@ -40,6 +40,9 @@ def _make_env_fn(
     reward_spider_hit: int = 300,
     reward_spider_penalty: int = 1000,
     reward_centipede_penalty: int = 1000,
+    reward_survival: float = 0.01,
+    reward_proximity_penalty: float = 1.0,
+    proximity_distance_tiles: int = 3,
 ):
     """Return a thunk that creates and seeds one monitored env (for VecEnv factories)."""
     def _thunk():
@@ -54,6 +57,9 @@ def _make_env_fn(
             reward_spider_hit=reward_spider_hit,
             reward_spider_penalty=reward_spider_penalty,
             reward_centipede_penalty=reward_centipede_penalty,
+            reward_survival=reward_survival,
+            reward_proximity_penalty=reward_proximity_penalty,
+            proximity_distance_tiles=proximity_distance_tiles,
         )
         env = Monitor(env)
         env.reset(seed=seed)
@@ -73,6 +79,9 @@ def make_vec_env(
     reward_spider_hit: int = 300,
     reward_spider_penalty: int = 1000,
     reward_centipede_penalty: int = 1000,
+    reward_survival: float = 0.01,
+    reward_proximity_penalty: float = 1.0,
+    proximity_distance_tiles: int = 3,
 ):
     kwargs = dict(
         reward_mushroom_hit=reward_mushroom_hit,
@@ -84,6 +93,9 @@ def make_vec_env(
         reward_spider_hit=reward_spider_hit,
         reward_spider_penalty=reward_spider_penalty,
         reward_centipede_penalty=reward_centipede_penalty,
+        reward_survival=reward_survival,
+        reward_proximity_penalty=reward_proximity_penalty,
+        proximity_distance_tiles=proximity_distance_tiles,
     )
     fns = [_make_env_fn(seed=seed + i, **kwargs) for i in range(n_envs)]
     if n_envs == 1:
@@ -151,6 +163,9 @@ def train(
     reward_spider_hit: int = 300,
     reward_spider_penalty: int = 1000,
     reward_centipede_penalty: int = 1000,
+    reward_survival: float = 0.01,
+    reward_proximity_penalty: float = 1.0,
+    proximity_distance_tiles: int = 3,
 ) -> None:
     if net_arch is None:
         net_arch = [256, 256]
@@ -177,6 +192,9 @@ def train(
         reward_spider_hit=reward_spider_hit,
         reward_spider_penalty=reward_spider_penalty,
         reward_centipede_penalty=reward_centipede_penalty,
+        reward_survival=reward_survival,
+        reward_proximity_penalty=reward_proximity_penalty,
+        proximity_distance_tiles=proximity_distance_tiles,
     )
 
     checkpoint_cb = CheckpointCallback(
@@ -248,6 +266,9 @@ if __name__ == "__main__":
     parser.add_argument("--reward-spider-hit", type=int, default=300)
     parser.add_argument("--reward-spider-penalty", type=int, default=1000)
     parser.add_argument("--reward-centipede-penalty", type=int, default=1000)
+    parser.add_argument("--reward-survival", type=float, default=0.01)
+    parser.add_argument("--reward-proximity-penalty", type=float, default=1.0)
+    parser.add_argument("--proximity-distance-tiles", type=int, default=3)
     args = parser.parse_args()
     train(
         total_timesteps=args.timesteps,
@@ -274,4 +295,7 @@ if __name__ == "__main__":
         reward_spider_hit=args.reward_spider_hit,
         reward_spider_penalty=args.reward_spider_penalty,
         reward_centipede_penalty=args.reward_centipede_penalty,
+        reward_survival=args.reward_survival,
+        reward_proximity_penalty=args.reward_proximity_penalty,
+        proximity_distance_tiles=args.proximity_distance_tiles,
     )

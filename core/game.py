@@ -362,6 +362,9 @@ class GameEngine:
         reward_spider_hit: int = 300,
         reward_spider_penalty: int = 1000,
         reward_centipede_penalty: int = 1000,
+        reward_survival: float = 0.01,
+        reward_proximity_penalty: float = 1.0,
+        proximity_distance_tiles: int = 3,
     ):
         self._rng = random.Random(seed)
         self._font = None  # initialised lazily so pygame.font is optional
@@ -374,6 +377,9 @@ class GameEngine:
         self.reward_spider_hit = reward_spider_hit
         self.reward_spider_penalty = reward_spider_penalty
         self.reward_centipede_penalty = reward_centipede_penalty
+        self.reward_survival = reward_survival
+        self.reward_proximity_penalty = reward_proximity_penalty
+        self.proximity_distance_tiles = proximity_distance_tiles
         self.reset()
 
     # ------------------------------------------------------------------
@@ -386,7 +392,7 @@ class GameEngine:
         _orig = random.random
         random.random = self._rng.random  # type: ignore[assignment]
 
-        self.score = 0
+        self.score = 0.0
         self.segments_destroyed = 0
         self.spiders_destroyed = 0
         self.player = Player()
@@ -409,20 +415,20 @@ class GameEngine:
         self.centipedes.append(Centipede(segs))
 
     # ------------------------------------------------------------------
-    def step(self, action: int) -> tuple[int, bool, bool]:
+    def step(self, action: int) -> tuple[float, bool, bool]:
         """
         Advance the game by one frame.
 
         Returns
         -------
-        reward : int
+        reward : float
         terminated : bool   – player lost all lives
         truncated : bool    – always False (no time limit enforced here)
         """
         if self.terminated:
             return 0, True, False
 
-        reward = 0
+        reward = 0.0
 
         self.player.apply_action(action)
         if self.player.wants_fire(action) and not self.bullets:
@@ -445,6 +451,8 @@ class GameEngine:
         reward += self._handle_bullet_spider()
         reward += self._handle_player_centipede()
         reward += self._handle_player_spider()
+        reward += self._proximity_penalty()
+        reward += self.reward_survival
 
         if not self.centipedes:
             self._spawn_centipede()
@@ -553,6 +561,33 @@ class GameEngine:
                 return -self.reward_spider_penalty
         return 0
 
+    def _proximity_penalty(self) -> float:
+        """Scaled penalty when any threat is within proximity_distance_tiles."""
+        if self.reward_proximity_penalty <= 0.0 or self.proximity_distance_tiles <= 0:
+            return 0.0
+
+        px = self.player.x + TILE / 2
+        py = self.player.y + TILE / 2
+        threshold = self.proximity_distance_tiles * TILE
+        worst = 0.0
+
+        for chain in self.centipedes:
+            for seg in chain.segments:
+                d = math.hypot(seg.x + TILE / 2 - px, seg.y + TILE / 2 - py)
+                if d < threshold:
+                    factor = 1.0 - d / threshold
+                    worst = max(worst, self.reward_proximity_penalty * factor)
+
+        for s in self._spider_mgr.spiders:
+            if not s.alive:
+                continue
+            d = math.hypot(s.x + TILE / 2 - px, s.y + TILE / 2 - py)
+            if d < threshold:
+                factor = 1.0 - d / threshold
+                worst = max(worst, self.reward_proximity_penalty * factor)
+
+        return -worst
+
     # ------------------------------------------------------------------
     # Grid observation encoding
     # 0=empty  1=mushroom  2=centipede body  3=centipede head
@@ -575,7 +610,8 @@ class GameEngine:
     #   [84 .. 86]  bullet: rel_x, rel_y, is_alive
     #   [87 .. 96]  2 spider slots × 5 features each:
     #                rel_x, rel_y, vel_x, vel_y, is_alive
-    #   [97 .. 104] 8-way lidar distances from the player (walls + mushrooms only)
+    #   [97 .. 104] 8-way lidar distances from the player
+    #               (walls, mushrooms, centipede segments, spiders)
     #               order: N, NE, E, SE, S, SW, W, NW
     _SEG_FEATURES = 7
     _SPIDER_FEATURES = 5
@@ -614,6 +650,19 @@ class GameEngine:
                 break
         return steps / float(COLS)
 
+    def _tile_blocked(self, col: int, row: int) -> bool:
+        """Return True if a lidar ray is blocked at (col, row)."""
+        if self.field.get(col, row) is not None:
+            return True
+        for chain in self.centipedes:
+            for seg in chain.segments:
+                if seg.col == col and seg.row == row:
+                    return True
+        for s in self._spider_mgr.spiders:
+            if s.alive and s.col == col and s.row == row:
+                return True
+        return False
+
     def get_relative_obs(self, out: np.ndarray | None = None) -> np.ndarray:
         """Build the entity-centric feature vector and return it.
 
@@ -627,13 +676,18 @@ class GameEngine:
 
         px = float(self.player.x)
         py = float(self.player.y)
+        pcx = px + TILE / 2
+        pcy = py + TILE / 2
         pcol = int(self.player.x) // TILE
         prow = int(self.player.y) // TILE
 
-        # Collect every live segment across all chains (total ≤ CENTIPEDE_LENGTH)
+        # Collect every live segment, nearest-first (total ≤ CENTIPEDE_LENGTH)
         all_segs: list[Segment] = []
         for chain in self.centipedes:
             all_segs.extend(chain.segments)
+        all_segs.sort(
+            key=lambda seg: math.hypot(seg.x + TILE / 2 - pcx, seg.y + TILE / 2 - pcy)
+        )
 
         offset = 0
         for i in range(CENTIPEDE_LENGTH):
@@ -665,8 +719,11 @@ class GameEngine:
             out[offset + 2] = 1.0  # is_alive
         offset += 3
 
-        # Spider slots
-        spiders = self._spider_mgr.spiders
+        # Spider slots (nearest-first)
+        spiders = sorted(
+            self._spider_mgr.spiders,
+            key=lambda s: math.hypot(s.x + TILE / 2 - pcx, s.y + TILE / 2 - pcy),
+        )
         for i in range(self._MAX_SPIDERS):
             if i < len(spiders):
                 s = spiders[i]
@@ -678,7 +735,7 @@ class GameEngine:
             # unoccupied slot stays all-zero
             offset += self._SPIDER_FEATURES
 
-        # 8-way lidar from player tile (walls and mushrooms only)
+        # 8-way lidar from player tile (walls, mushrooms, centipede, spiders)
         max_dist = float(max(COLS, ROWS))
         for d_idx, (dc, dr) in enumerate(self._LIDAR_DIRS):
             c, r = pcol, prow
@@ -689,7 +746,7 @@ class GameEngine:
                 steps += 1
                 if c < 0 or c >= COLS or r < 0 or r >= ROWS:
                     break
-                if self.field.get(c, r) is not None:
+                if self._tile_blocked(c, r):
                     break
             out[offset + d_idx] = steps / max_dist
 
@@ -749,7 +806,7 @@ class GameEngine:
 
         if font:
             hud = font.render(
-                f"Score: {self.score}   Lives: {self.player.lives}", True, COLOR_HUD
+                f"Score: {self.score:.0f}   Lives: {self.player.lives}", True, COLOR_HUD
             )
             surf.blit(hud, (8, HEIGHT - 20))
             if self.terminated:
