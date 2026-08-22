@@ -34,5 +34,5 @@
   "reward-survival": "0",
   "reward-proximity-penalty": "0",
   "proximity-distance-tiles": "3",
-  "watch-model": "models/dqn_centipede"
+  "watch-model": "models/dqn_centipede_ckpt_1098240_steps"
 }

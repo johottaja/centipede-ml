@@ -11,6 +11,8 @@ Terminated   : player loses all lives
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pygame
 import gymnasium as gym
@@ -45,6 +47,8 @@ class CentipedeEnv(gym.Env):
         reward_survival: float = 0.01,
         reward_proximity_penalty: float = 1.0,
         proximity_distance_tiles: int = 3,
+        window_size: tuple[int, int] | None = None,
+        present_fn: Callable[[pygame.Surface], None] | None = None,
     ):
         super().__init__()
         assert render_mode in (None, "human", "rgb_array"), \
@@ -53,6 +57,8 @@ class CentipedeEnv(gym.Env):
         self.render_mode = render_mode
         self.frame_skip = frame_skip
         self.render_fps = self.metadata["render_fps"]
+        self.window_size = window_size or (WIDTH, HEIGHT)
+        self.present_fn = present_fn
 
         n_channels = GameEngine.OCCUPANCY_CHANNELS * frame_skip
         self.observation_space = spaces.Box(
@@ -98,7 +104,7 @@ class CentipedeEnv(gym.Env):
         if self._surf is None:
             self._surf = pygame.Surface((WIDTH, HEIGHT))
         if self.render_mode == "human" and self._window is None:
-            self._window = pygame.display.set_mode((WIDTH, HEIGHT))
+            self._window = pygame.display.set_mode(self.window_size)
             pygame.display.set_caption("Centipede")
             self._clock = pygame.time.Clock()
 
@@ -158,7 +164,11 @@ class CentipedeEnv(gym.Env):
 
         if self.render_mode == "human":
             pygame.event.pump()
+            if self.window_size != (WIDTH, HEIGHT):
+                self._window.fill((14, 16, 22))
             self._window.blit(self._surf, (0, 0))
+            if self.present_fn is not None:
+                self.present_fn(self._window)
             pygame.display.flip()
             self._clock.tick(self.render_fps)
             return None

@@ -54,7 +54,7 @@ Standard `gymnasium.Env` wrapper.
 
 - **Observation space:** `Box(0, 255, shape=(31, 30, 24), dtype=uint8)` — 4 stacked occupancy frames × 6 channels (player, mushrooms, centipede heads, centipede body, spiders, bullet). Each channel encodes fractional tile occupancy (0–255).
 - **Action repeat:** agent picks one action every 4 game frames (`frame_skip=4` for training/watch; `frame_skip=1` for human play). Rewards are summed across repeated frames.
-- **Action space:** `Discrete(9)` — NOOP / LEFT / RIGHT / UP / DOWN, plus LEFT/RIGHT/UP/DOWN with FIRE. No stand-and-fire; a shot only fires if the player actually moved that frame.
+- **Action space:** `Discrete(9)` — NOOP / LEFT / RIGHT / UP / DOWN, plus LEFT/RIGHT/UP/DOWN with FIRE. No stand-and-fire action; fire actions still shoot when movement is blocked by a wall or the player-zone edge.
 - **Reward:** score delta per agent step (includes survival bonus and proximity shaping)
 - **Terminated:** player loses all 3 lives
 - **`step()` info dict:** `{"score": int, "lives": int, "segments_destroyed": int, "spiders_destroyed": int}`
@@ -93,6 +93,7 @@ Uses `SubprocVecEnv` (default 4 parallel workers) to collect experience concurre
 ## core/watch.py
 
 Loads a saved model and runs it visually for N episodes in a pygame window.  
+The playfield stays 480×496; the window is larger: occupancy-channel overlays (click or keys 1–6 / F1–F4) and an action-probability map under the game. Human play is unchanged.  
 Prints `score` and `total_reward` per episode to stdout.  
 The launcher **Watch Agent** tab lists the final model and all checkpoints (`dqn_centipede_ckpt_*_steps.zip`); selection is persisted in `settings.json` as `watch-model`.  
 Usage: `uv run python -m core.watch [--model PATH] [--episodes N] [--fps N]`  

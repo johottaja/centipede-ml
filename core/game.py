@@ -457,10 +457,8 @@ class GameEngine:
 
         reward = 0.0
 
-        x0, y0 = self.player.x, self.player.y
         self.player.apply_action(action)
-        moved = self.player.x != x0 or self.player.y != y0
-        if moved and self.player.wants_fire(action) and not self.bullets:
+        if self.player.wants_fire(action) and not self.bullets:
             b = self.player.shoot()
             if b:
                 self.bullets.append(b)
