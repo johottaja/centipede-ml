@@ -34,6 +34,9 @@ SPECS: list[tuple] = [
     ("Atoms (C51)",            "n-atoms",                "51",      "int",   3,    501,  "Number of atoms in the return distribution"),
     ("V-min",                  "v-min",                  "-10000",  "float", None, None, "Minimum return value in the C51 support"),
     ("V-max",                  "v-max",                  "10000",   "float", None, None, "Maximum return value in the C51 support"),
+    ("Prioritized replay",     "prioritized-replay",     "true",    "choice", ["true", "false"], None, "Sample by TD-error priority and correct with importance-sampling weights (Schaul et al. 2015)"),
+    ("PER alpha",              "per-alpha",              "0.6",     "float", 0,    1,    "Priority exponent (P(i) ∝ |δ_i|^α). 0 = uniform sampling"),
+    ("PER beta",               "per-beta",               "0.4",     "float", 0,    1,    "Importance-sampling exponent at the start of training (annealed to 1)"),
 
     ("section", "Rewards"),
     ("Mushroom hit",           "reward-mushroom-hit",     "1",      "int",   0,    None, "Reward for hitting a mushroom without destroying it"),

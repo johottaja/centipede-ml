@@ -4,7 +4,7 @@
   "seed": "0",
   "eval-freq": "30000",
   "learning-rate": "0.0003",
-  "buffer-size": "150000",
+  "buffer-size": "300000",
   "learning-starts": "10000",
   "batch-size": "512",
   "tau": "1.0",
@@ -18,6 +18,9 @@
   "n-atoms": "51",
   "v-min": "-400",
   "v-max": "2500",
+  "prioritized-replay": "true",
+  "per-alpha": "0.6",
+  "per-beta": "0.4",
   "reward-mushroom-hit": "1",
   "reward-mushroom-destroy": "5",
   "reward-body-hit": "10",
@@ -30,5 +33,5 @@
   "reward-survival": "0",
   "reward-proximity-penalty": "0",
   "proximity-distance-tiles": "3",
-  "watch-model": "models/dqn_centipede"
+  "watch-model": "models/dqn_centipede_ckpt_99840_steps"
 }

@@ -20,6 +20,8 @@ from stable_baselines3.common.policies import BaseModel
 from stable_baselines3.dqn.policies import DQNPolicy
 from stable_baselines3.dqn.dqn import DQN
 
+from core.per import PrioritizedReplayBuffer
+
 
 def project_distribution(
     next_dist: th.Tensor,
@@ -139,9 +141,40 @@ class C51(DQN):
 
     policy: C51Policy
 
+    def __init__(
+        self,
+        *args: Any,
+        prioritized_replay: bool = True,
+        prioritized_replay_alpha: float = 0.6,
+        prioritized_replay_beta: float = 0.4,
+        prioritized_replay_eps: float = 1e-6,
+        **kwargs: Any,
+    ) -> None:
+        self.prioritized_replay = prioritized_replay
+        self.prioritized_replay_beta = prioritized_replay_beta
+        if prioritized_replay:
+            kwargs.setdefault("replay_buffer_class", PrioritizedReplayBuffer)
+            if kwargs["replay_buffer_class"] is PrioritizedReplayBuffer:
+                rb_kwargs = dict(kwargs.get("replay_buffer_kwargs") or {})
+                rb_kwargs.setdefault("alpha", prioritized_replay_alpha)
+                rb_kwargs.setdefault("eps", prioritized_replay_eps)
+                kwargs["replay_buffer_kwargs"] = rb_kwargs
+        super().__init__(*args, **kwargs)
+
     def train(self, gradient_steps: int, batch_size: int = 100) -> None:
         self.policy.set_training_mode(True)
         self._update_learning_rate(self.policy.optimizer)
+
+        use_per = self.prioritized_replay and isinstance(
+            self.replay_buffer, PrioritizedReplayBuffer
+        )
+        if use_per:
+            # Anneal β from β₀ → 1 so IS correction is complete by the end.
+            progress = 1.0 - getattr(self, "_current_progress_remaining", 1.0)
+            self.replay_buffer.beta = (
+                self.prioritized_replay_beta
+                + progress * (1.0 - self.prioritized_replay_beta)
+            )
 
         losses = []
         support = self.q_net.support
@@ -174,7 +207,18 @@ class C51(DQN):
             batch_idx = th.arange(actions.shape[0], device=actions.device)
             action_logits = logits[batch_idx, actions]
             log_probs = F.log_softmax(action_logits, dim=-1)
-            loss = -(proj * log_probs).sum(dim=-1).mean()
+            # Per-sample cross-entropy is the C51 TD error (Rainbow uses this as priority).
+            td_errors = -(proj * log_probs).sum(dim=-1)
+
+            if use_per:
+                weights = self.replay_buffer.importance_weights
+                loss = (td_errors * weights).mean()
+                self.replay_buffer.update_priorities(
+                    self.replay_buffer.tree_indices,
+                    td_errors.detach().cpu().numpy(),
+                )
+            else:
+                loss = td_errors.mean()
             losses.append(loss.item())
 
             self.policy.optimizer.zero_grad()

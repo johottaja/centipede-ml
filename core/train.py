@@ -355,6 +355,9 @@ def train(
     n_atoms: int = 51,
     v_min: float = -10_000.0,
     v_max: float = 10_000.0,
+    prioritized_replay: bool = True,
+    per_alpha: float = 0.6,
+    per_beta: float = 0.4,
     reward_mushroom_hit: int = 1,
     reward_mushroom_destroy: int = 5,
     reward_body_hit: int = 10,
@@ -374,6 +377,8 @@ def train(
 
     if net_arch is None:
         net_arch = [256, 256]
+    if isinstance(prioritized_replay, str):
+        prioritized_replay = prioritized_replay.lower() in ("1", "true", "yes")
 
     os.makedirs(MODEL_DIR, exist_ok=True)
 
@@ -442,6 +447,9 @@ def train(
             "v_min": v_min,
             "v_max": v_max,
         },
+        prioritized_replay=prioritized_replay,
+        prioritized_replay_alpha=per_alpha,
+        prioritized_replay_beta=per_beta,
         device=device,
         verbose=0,
         seed=seed,
@@ -451,6 +459,7 @@ def train(
     _log(
         f"training (C51) | {total_timesteps:,} steps | {n_envs} envs | "
         f"{n_atoms} atoms [{v_min:,.0f}, {v_max:,.0f}] | "
+        f"{'PER α=' + str(per_alpha) + ' β=' + str(per_beta) if prioritized_replay else 'uniform replay'} | "
         f"eval every {eval_freq:,} steps | seed {seed}"
     )
     t0 = time.monotonic()
@@ -506,6 +515,12 @@ if __name__ == "__main__":
                         help="Minimum support value for C51 atoms")
     parser.add_argument("--v-max", type=float,
                         help="Maximum support value for C51 atoms")
+    parser.add_argument("--prioritized-replay", type=str, choices=["true", "false"],
+                        help="Use prioritized experience replay (Schaul et al. 2015)")
+    parser.add_argument("--per-alpha", type=float,
+                        help="PER priority exponent (0 = uniform)")
+    parser.add_argument("--per-beta", type=float,
+                        help="PER importance-sampling exponent at start of training (annealed to 1)")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress human-readable logs on stderr (JSON stdout only)")
     parser.add_argument("--reward-mushroom-hit", type=int)
@@ -545,6 +560,9 @@ if __name__ == "__main__":
         n_atoms=args.n_atoms,
         v_min=args.v_min,
         v_max=args.v_max,
+        prioritized_replay=args.prioritized_replay,
+        per_alpha=args.per_alpha,
+        per_beta=args.per_beta,
         quiet=args.quiet,
         reward_mushroom_hit=args.reward_mushroom_hit,
         reward_mushroom_destroy=args.reward_mushroom_destroy,
