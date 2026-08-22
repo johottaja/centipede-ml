@@ -2,10 +2,10 @@
 Gymnasium environment for Centipede.
 
 Observation : uint8 occupancy grid, shape (ROWS, COLS, OCCUPANCY_CHANNELS * frame_skip).
-              Each frame contributes 5 channels (player, mushrooms, heads, body, spiders)
-              with values 0–255 encoding fractional tile occupancy.
-              Default frame_skip=4 stacks 4 consecutive frames → shape (31, 30, 20).
-Action space: Discrete(10) – 5 moves (NOOP/L/R/U/D) × fire on/off
+              Each frame contributes 6 channels (player, mushrooms, heads, body,
+              spiders, bullet) with values 0–255 encoding fractional tile occupancy.
+              Default frame_skip=4 stacks 4 consecutive frames → shape (31, 30, 24).
+Action space: Discrete(9) – 5 moves + 4 move-and-fire (no standing fire)
 Reward       : score delta per agent step (summed across repeated frames)
 Terminated   : player loses all lives
 """
@@ -52,6 +52,7 @@ class CentipedeEnv(gym.Env):
         assert frame_skip >= 1
         self.render_mode = render_mode
         self.frame_skip = frame_skip
+        self.render_fps = self.metadata["render_fps"]
 
         n_channels = GameEngine.OCCUPANCY_CHANNELS * frame_skip
         self.observation_space = spaces.Box(
@@ -135,6 +136,8 @@ class CentipedeEnv(gym.Env):
             self._obs_buf[:, :, ch0:ch1] = np.transpose(
                 (self._frame_buf * 255.0).astype(np.uint8), (1, 2, 0)
             )
+            if self.render_mode == "human":
+                self.render()
             if terminated or truncated:
                 break
 
@@ -154,9 +157,10 @@ class CentipedeEnv(gym.Env):
         self._engine.render(self._surf, self._font)
 
         if self.render_mode == "human":
+            pygame.event.pump()
             self._window.blit(self._surf, (0, 0))
             pygame.display.flip()
-            self._clock.tick(self.metadata["render_fps"])
+            self._clock.tick(self.render_fps)
             return None
 
         if self.render_mode == "rgb_array":

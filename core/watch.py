@@ -15,9 +15,8 @@ import os
 
 import pygame
 from core.env import CentipedeEnv
-from core.game import WIDTH, HEIGHT
 from core.c51 import C51
-from core.train import MODEL_PATH, _make_env_fn, list_saved_models
+from core.train import MODEL_PATH, FRAME_SKIP, list_saved_models
 
 
 def _pick_model_interactive() -> str | None:
@@ -46,47 +45,35 @@ def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> Non
     model = C51.load(model_path)
     print(f"Loaded model from {model_path}.zip")
 
-    proc_env = _make_env_fn(seed=0)()
-
-    pygame.init()
-    window = pygame.display.set_mode((WIDTH, HEIGHT))
+    env = CentipedeEnv(render_mode="human", frame_skip=FRAME_SKIP)
+    env.render_fps = fps
+    obs, _ = env.reset()
     pygame.display.set_caption("Centipede – C51 Agent")
-    clock = pygame.time.Clock()
-    font = pygame.font.SysFont("monospace", 16)
-    surf = pygame.Surface((WIDTH, HEIGHT))
-
-    base_env: CentipedeEnv = proc_env.unwrapped
 
     for ep in range(episodes):
-        obs, _ = proc_env.reset()
+        if ep > 0:
+            obs, _ = env.reset()
         total_reward = 0.0
         done = False
+        info: dict = {}
 
         while not done:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    proc_env.close()
-                    pygame.quit()
+                    env.close()
                     return
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    proc_env.close()
-                    pygame.quit()
+                    env.close()
                     return
 
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = proc_env.step(int(action))
+            obs, reward, terminated, truncated, info = env.step(int(action))
             total_reward += reward
             done = terminated or truncated
 
-            base_env._engine.render(surf, font)
-            window.blit(surf, (0, 0))
-            pygame.display.flip()
-            clock.tick(fps)
-
         print(f"Episode {ep + 1}: score={info['score']}  total_reward={total_reward:.0f}")
 
-    proc_env.close()
-    pygame.quit()
+    env.close()
 
 
 if __name__ == "__main__":

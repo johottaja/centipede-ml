@@ -28,7 +28,9 @@ def keys_to_action(keys) -> int:
         move = ACTION_DOWN
     else:
         move = ACTION_NOOP
-    return move + (NUM_MOVES if fire else 0)
+    if fire and move != ACTION_NOOP:
+        return NUM_MOVES + (move - 1)
+    return move
 
 
 def main():
@@ -48,8 +50,8 @@ def main():
 
         if not env._engine.terminated:
             env.step(action)
-
-        env.render()
+        else:
+            env.render()
 
 
 if __name__ == "__main__":

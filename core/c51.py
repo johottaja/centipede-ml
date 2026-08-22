@@ -27,7 +27,7 @@ def project_distribution(
     next_dist: th.Tensor,
     rewards: th.Tensor,
     dones: th.Tensor,
-    gamma: float,
+    gamma: float | th.Tensor,
     support: th.Tensor,
 ) -> th.Tensor:
     """Project the bootstrap distribution onto the fixed atom support."""
@@ -37,10 +37,13 @@ def project_distribution(
     v_max = support[-1]
     delta_z = (v_max - v_min) / (n_atoms - 1)
 
-    rewards = rewards.squeeze(-1)
-    dones = dones.squeeze(-1).float()
+    rewards = rewards.reshape(-1, 1)
+    dones = dones.reshape(-1, 1).float()
+    if not isinstance(gamma, th.Tensor):
+        gamma = th.tensor(gamma, device=next_dist.device, dtype=next_dist.dtype)
+    gamma = gamma.reshape(-1, 1)
 
-    tz = rewards.unsqueeze(1) + (1.0 - dones.unsqueeze(1)) * gamma * support.unsqueeze(0)
+    tz = rewards + (1.0 - dones) * gamma * support.unsqueeze(0)
     tz = tz.clamp(v_min, v_max)
     b = (tz - v_min) / delta_z
     l = b.floor().long()
@@ -158,6 +161,9 @@ class C51(DQN):
                 rb_kwargs = dict(kwargs.get("replay_buffer_kwargs") or {})
                 rb_kwargs.setdefault("alpha", prioritized_replay_alpha)
                 rb_kwargs.setdefault("eps", prioritized_replay_eps)
+                # OffPolicyAlgorithm only injects these when replay_buffer_class is None.
+                rb_kwargs.setdefault("n_steps", kwargs.get("n_steps", 1))
+                rb_kwargs.setdefault("gamma", kwargs.get("gamma", 0.99))
                 kwargs["replay_buffer_kwargs"] = rb_kwargs
         super().__init__(*args, **kwargs)
 
@@ -198,7 +204,7 @@ class C51(DQN):
                     next_dist,
                     replay_data.rewards,
                     replay_data.dones,
-                    float(discounts) if isinstance(discounts, (int, float)) else discounts,
+                    discounts,
                     support,
                 )
 

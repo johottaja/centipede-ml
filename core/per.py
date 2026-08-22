@@ -11,7 +11,7 @@ from typing import Any, Optional
 import numpy as np
 import torch as th
 from gymnasium import spaces
-from stable_baselines3.common.buffers import ReplayBuffer
+from stable_baselines3.common.buffers import NStepReplayBuffer
 from stable_baselines3.common.type_aliases import ReplayBufferSamples
 from stable_baselines3.common.vec_env import VecNormalize
 
@@ -61,11 +61,12 @@ class _SegmentTree:
         return i - n
 
 
-class PrioritizedReplayBuffer(ReplayBuffer):
-    """Proportional PER on top of SB3's ReplayBuffer.
+class PrioritizedReplayBuffer(NStepReplayBuffer):
+    """Proportional PER on top of SB3's NStepReplayBuffer.
 
     New transitions are inserted at max priority so they are sampled at
     least once. `beta` is annealed externally (typically  β₀ → 1).
+    When `n_steps > 1`, sampled targets are n-step returns (Rainbow).
     """
 
     def __init__(
@@ -78,6 +79,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         optimize_memory_usage: bool = False,
         alpha: float = 0.6,
         eps: float = 1e-6,
+        n_steps: int = 1,
+        gamma: float = 0.99,
         **kwargs: Any,
     ) -> None:
         if optimize_memory_usage:
@@ -91,6 +94,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             device=device,
             n_envs=n_envs,
             optimize_memory_usage=False,
+            n_steps=n_steps,
+            gamma=gamma,
             **kwargs,
         )
         self.alpha = alpha
@@ -162,20 +167,84 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         if env_indices is None:
             env_indices = np.random.randint(0, high=self.n_envs, size=len(batch_inds))
 
-        next_obs = self._normalize_obs(
-            self.next_observations[batch_inds, env_indices, :], env
+        if self.n_steps <= 1:
+            next_obs = self._normalize_obs(
+                self.next_observations[batch_inds, env_indices, :], env
+            )
+            data = (
+                self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
+                self.actions[batch_inds, env_indices, :],
+                next_obs,
+                (self.dones[batch_inds, env_indices]
+                 * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
+                self._normalize_reward(
+                    self.rewards[batch_inds, env_indices].reshape(-1, 1), env
+                ),
+            )
+            return ReplayBufferSamples(*tuple(map(self.to_torch, data)))
+
+        return self._get_n_step_samples(batch_inds, env_indices, env)
+
+    def _get_n_step_samples(
+        self,
+        batch_inds: np.ndarray,
+        env_indices: np.ndarray,
+        env: Optional[VecNormalize],
+    ) -> ReplayBufferSamples:
+        """N-step returns with PER's chosen env indices (SB3 NStepReplayBuffer logic)."""
+        last_valid_index = self.pos - 1
+        original_timeout_values = self.timeouts[last_valid_index].copy()
+        self.timeouts[last_valid_index] = np.logical_or(
+            original_timeout_values, np.logical_not(self.dones[last_valid_index])
         )
-        data = (
-            self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
-            self.actions[batch_inds, env_indices, :],
-            next_obs,
-            (self.dones[batch_inds, env_indices]
-             * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
-            self._normalize_reward(
-                self.rewards[batch_inds, env_indices].reshape(-1, 1), env
-            ),
+        try:
+            steps = np.arange(self.n_steps).reshape(1, -1)
+            indices = (batch_inds[:, None] + steps) % self.buffer_size
+
+            rewards_seq = self._normalize_reward(
+                self.rewards[indices, env_indices[:, None]], env
+            )
+            dones_seq = self.dones[indices, env_indices[:, None]]
+            truncated_seq = self.timeouts[indices, env_indices[:, None]]
+
+            done_or_truncated = np.logical_or(dones_seq, truncated_seq)
+            done_idx = done_or_truncated.argmax(axis=1)
+            has_done_or_truncated = done_or_truncated.any(axis=1)
+            done_idx = np.where(has_done_or_truncated, done_idx, self.n_steps - 1)
+
+            mask = np.arange(self.n_steps).reshape(1, -1) <= done_idx[:, None]
+            target_q_discounts = self.gamma ** mask.sum(axis=1, keepdims=True).astype(
+                np.float32
+            )
+
+            discounts = self.gamma ** np.arange(self.n_steps, dtype=np.float32).reshape(
+                1, -1
+            )
+            n_step_returns = (rewards_seq * discounts * mask).sum(axis=1, keepdims=True)
+
+            last_indices = (batch_inds + done_idx) % self.buffer_size
+            next_obs = self._normalize_obs(
+                self.next_observations[last_indices, env_indices], env
+            )
+            next_dones = self.dones[last_indices, env_indices][:, None].astype(np.float32)
+            next_timeouts = self.timeouts[last_indices, env_indices][:, None].astype(
+                np.float32
+            )
+            final_dones = next_dones * (1.0 - next_timeouts)
+        finally:
+            self.timeouts[last_valid_index] = original_timeout_values
+
+        obs = self._normalize_obs(self.observations[batch_inds, env_indices], env)
+        actions = self.actions[batch_inds, env_indices]
+
+        return ReplayBufferSamples(
+            observations=self.to_torch(obs),
+            actions=self.to_torch(actions),
+            next_observations=self.to_torch(next_obs),
+            dones=self.to_torch(final_dones),
+            rewards=self.to_torch(n_step_returns),
+            discounts=self.to_torch(target_q_discounts),
         )
-        return ReplayBufferSamples(*tuple(map(self.to_torch, data)))
 
     def update_priorities(self, indices: np.ndarray, td_errors: np.ndarray) -> None:
         td_errors = np.abs(np.asarray(td_errors, dtype=np.float64))

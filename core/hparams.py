@@ -25,6 +25,7 @@ SPECS: list[tuple] = [
     ("Batch size",             "batch-size",             "64",      "int",   1,    None, "Mini-batch size for each update"),
     ("Tau (soft update)",      "tau",                    "1.0",     "float", 0,    1,    "Soft update coefficient for target network (1 = hard copy)"),
     ("Gamma (discount)",       "gamma",                  "0.99",    "float", 0,    1,    "Discount factor for future rewards"),
+    ("N-step",                 "n-steps",                "4",       "int",   1,    None, "N-step returns (Rainbow). 1 = one-step TD; typical Rainbow value is 3"),
     ("Train frequency",        "train-freq",             "4",       "int",   1,    None, "Steps between gradient updates"),
     ("Gradient steps",         "gradient-steps",         "1",       "int",   1,    None, "Gradient updates per train call"),
     ("Target update interval", "target-update-interval", "1000",    "int",   1,    None, "Steps between target network syncs"),

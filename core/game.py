@@ -42,24 +42,22 @@ SPIDER_DIR_CHANGE_INTERVAL = 30  # frames between random direction changes
 # ---------------------------------------------------------------------------
 # Action constants  (used by the gym env and the human runner)
 # ---------------------------------------------------------------------------
-# Move is action % NUM_MOVES; fire is action >= NUM_MOVES.
-# 0–4: NOOP / LEFT / RIGHT / UP / DOWN
-# 5–9: the same moves while firing
+# 0–4: NOOP / LEFT / RIGHT / UP / DOWN (no fire)
+# 5–8: LEFT / RIGHT / UP / DOWN while firing (no stand-and-fire)
 ACTION_NOOP = 0
 ACTION_LEFT = 1
 ACTION_RIGHT = 2
 ACTION_UP = 3
 ACTION_DOWN = 4
 NUM_MOVES = 5
-ACTION_FIRE = NUM_MOVES + ACTION_NOOP  # stand still and shoot (legacy alias)
-NUM_ACTIONS = NUM_MOVES * 2
+NUM_ACTIONS = 9  # 5 moves + 4 move-and-fire
 
 
 def decode_action(action: int) -> tuple[int, bool]:
-    """Split a discrete action into (move, fire)."""
-    fire = action >= NUM_MOVES
-    move = action % NUM_MOVES
-    return move, fire
+    """Split a discrete action into (move, fire). Standing fire does not exist."""
+    if action < NUM_MOVES:
+        return action, False
+    return action - NUM_MOVES + 1, True
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +407,7 @@ class GameEngine:
         self.segments_destroyed = 0
         self.spiders_destroyed = 0
         self.player = Player()
+        self._place_player()
         self.bullets: list[Bullet] = []
         self.centipedes: list[Centipede] = []
         self.field = MushroomField()
@@ -437,6 +436,11 @@ class GameEngine:
             segs.append(seg)
         self.centipedes.append(Centipede(segs))
 
+    def _place_player(self):
+        """Put the player on a random column of the home row."""
+        self.player.x = self._rng.randint(0, COLS - 1) * TILE
+        self.player.y = (ROWS - 2) * TILE
+
     # ------------------------------------------------------------------
     def step(self, action: int) -> tuple[float, bool, bool]:
         """
@@ -453,8 +457,10 @@ class GameEngine:
 
         reward = 0.0
 
+        x0, y0 = self.player.x, self.player.y
         self.player.apply_action(action)
-        if self.player.wants_fire(action) and not self.bullets:
+        moved = self.player.x != x0 or self.player.y != y0
+        if moved and self.player.wants_fire(action) and not self.bullets:
             b = self.player.shoot()
             if b:
                 self.bullets.append(b)
@@ -550,8 +556,7 @@ class GameEngine:
                     if self.player.lives <= 0:
                         self.terminated = True
                     else:
-                        self.player.x = WIDTH // 2 - TILE // 2
-                        self.player.y = (ROWS - 2) * TILE
+                        self._place_player()
                     return -self.reward_centipede_penalty
         return 0
 
@@ -579,8 +584,7 @@ class GameEngine:
                 if self.player.lives <= 0:
                     self.terminated = True
                 else:
-                    self.player.x = WIDTH // 2 - TILE // 2
-                    self.player.y = (ROWS - 2) * TILE
+                    self._place_player()
                 return -self.reward_spider_penalty
         return 0
 
@@ -612,15 +616,16 @@ class GameEngine:
         return -worst
 
     # ------------------------------------------------------------------
-    # Occupancy-grid observation (5 channels, float32 in [0, 1])
+    # Occupancy-grid observation (6 channels, float32 in [0, 1])
     #   0 = player   1 = mushrooms   2 = centipede heads
-    #   3 = centipede body   4 = spiders
-    OCCUPANCY_CHANNELS = 5
+    #   3 = centipede body   4 = spiders   5 = bullet
+    OCCUPANCY_CHANNELS = 6
     CH_PLAYER = 0
     CH_MUSHROOM = 1
     CH_HEAD = 2
     CH_BODY = 3
     CH_SPIDER = 4
+    CH_BULLET = 5
     _TILE_AREA = float(TILE * TILE)
 
     @staticmethod
@@ -654,7 +659,7 @@ class GameEngine:
                     channel[row, col] += (overlap_w * overlap_h) / GameEngine._TILE_AREA
 
     def get_occupancy_obs(self, out: np.ndarray | None = None) -> np.ndarray:
-        """Build a 5-channel occupancy grid, shape (5, ROWS, COLS), float32 in [0, 1].
+        """Build a 6-channel occupancy grid, shape (6, ROWS, COLS), float32 in [0, 1].
 
         Each channel scores tiles by the fraction of the tile area covered by
         that entity type. Values are clipped to 1.0 per channel.
@@ -685,6 +690,13 @@ class GameEngine:
             self._stamp_rect_occupancy(
                 out[self.CH_PLAYER], r.left, r.top, r.right, r.bottom
             )
+
+        for b in self.bullets:
+            if b.alive:
+                r = b.rect
+                self._stamp_rect_occupancy(
+                    out[self.CH_BULLET], r.left, r.top, r.right, r.bottom
+                )
 
         np.clip(out, 0.0, 1.0, out=out)
         return out

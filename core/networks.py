@@ -12,11 +12,11 @@ from core.game import ROWS, COLS
 class GridCNN(BaseFeaturesExtractor):
     """Small CNN for 31×30 occupancy grids (channels-first input from SB3)."""
 
-    def __init__(self, observation_space: spaces.Box, features_dim: int = 256):
+    def __init__(self, observation_space: spaces.Box, features_dim: int = 512):
         super().__init__(observation_space, features_dim)
         n_input_channels = int(observation_space.shape[0])
         self.cnn = nn.Sequential(
-            nn.Conv2d(n_input_channels, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(n_input_channels, 32, kernel_size=5, stride=2, padding=2),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),

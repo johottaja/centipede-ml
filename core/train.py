@@ -1,7 +1,7 @@
 """
 Train a C51 (Categorical DQN) agent on Centipede using Stable-Baselines3.
 
-Observation: uint8 occupancy grid (31, 30, 20) — 4 stacked frames × 5 channels.
+Observation: uint8 occupancy grid (31, 30, 24) — 4 stacked frames × 6 channels.
 Policy: C51Policy with custom GridCNN feature extractor + distributional MLP head.
 The trained model is saved to models/dqn_centipede.zip.
 
@@ -345,6 +345,7 @@ def train(
     batch_size: int = 64,
     tau: float = 1.0,
     gamma: float = 0.99,
+    n_steps: int = 4,
     train_freq: int = 4,
     gradient_steps: int = 1,
     target_update_interval: int = 1_000,
@@ -433,6 +434,7 @@ def train(
         batch_size=batch_size,
         tau=tau,
         gamma=gamma,
+        n_steps=n_steps,
         train_freq=train_freq,
         gradient_steps=gradient_steps,
         target_update_interval=target_update_interval,
@@ -440,7 +442,7 @@ def train(
         exploration_final_eps=exploration_final_eps,
         policy_kwargs={
             "features_extractor_class": GridCNN,
-            "features_extractor_kwargs": {"features_dim": 256},
+            "features_extractor_kwargs": {"features_dim": 512},
             "net_arch": net_arch,
             "normalize_images": True,
             "n_atoms": n_atoms,
@@ -459,6 +461,7 @@ def train(
     _log(
         f"training (C51) | {total_timesteps:,} steps | {n_envs} envs | "
         f"{n_atoms} atoms [{v_min:,.0f}, {v_max:,.0f}] | "
+        f"n-step={n_steps} | "
         f"{'PER α=' + str(per_alpha) + ' β=' + str(per_beta) if prioritized_replay else 'uniform replay'} | "
         f"eval every {eval_freq:,} steps | seed {seed}"
     )
@@ -500,6 +503,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--tau", type=float)
     parser.add_argument("--gamma", type=float)
+    parser.add_argument("--n-steps", type=int,
+                        help="N-step returns (Rainbow). 1 = one-step TD")
     parser.add_argument("--train-freq", type=int)
     parser.add_argument("--gradient-steps", type=int)
     parser.add_argument("--target-update-interval", type=int)
@@ -550,6 +555,7 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         tau=args.tau,
         gamma=args.gamma,
+        n_steps=args.n_steps,
         train_freq=args.train_freq,
         gradient_steps=args.gradient_steps,
         target_update_interval=args.target_update_interval,
