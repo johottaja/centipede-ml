@@ -1,8 +1,8 @@
 """
-Train a DQN agent on Centipede using Stable-Baselines3.
+Train a Double DQN agent on Centipede using Stable-Baselines3.
 
-Observation: entity-centric float32 vector of length RELATIVE_OBS_SIZE (105).
-Policy: MlpPolicy (two hidden layers).
+Observation: uint8 occupancy grid (31, 30, 20) — 4 stacked frames × 5 channels.
+Policy: CnnPolicy with a small custom CNN + MLP head.
 The trained model is saved to models/dqn_centipede.zip.
 
 Progress is emitted to stdout as newline-delimited JSON objects:
@@ -17,22 +17,138 @@ import argparse
 import json
 import os
 import time
+from typing import Any
 
+import numpy as np
+import torch as th
+import torch.nn as nn
+import torch.nn.functional as F
 import torch
+from gymnasium import spaces
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 
 from core.env import CentipedeEnv
+from core.game import ROWS, COLS
 
 MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "dqn_centipede")
+FRAME_SKIP = 4
+
+
+def list_saved_models() -> list[tuple[str, str]]:
+    """Return (path_without_zip, label) pairs, newest file first."""
+    if not os.path.isdir(MODEL_DIR):
+        return []
+
+    entries: list[tuple[str, str, float]] = []
+
+    final_zip = MODEL_PATH + ".zip"
+    if os.path.isfile(final_zip):
+        entries.append((MODEL_PATH, "Final model", os.path.getmtime(final_zip)))
+
+    prefix = "dqn_centipede_ckpt_"
+    suffix = "_steps.zip"
+    for fname in os.listdir(MODEL_DIR):
+        if not fname.startswith(prefix) or not fname.endswith(suffix):
+            continue
+        full = os.path.join(MODEL_DIR, fname)
+        path = full[:-4]
+        steps = fname[len(prefix):-len(suffix)]
+        try:
+            steps_fmt = f"{int(steps):,}"
+        except ValueError:
+            steps_fmt = steps
+        entries.append((
+            path,
+            f"Checkpoint — {steps_fmt} steps",
+            os.path.getmtime(full),
+        ))
+
+    entries.sort(key=lambda e: e[2], reverse=True)
+    return [(path, label) for path, label, _ in entries]
+
+
+class GridCNN(BaseFeaturesExtractor):
+    """Small CNN for 31×30 occupancy grids (channels-first input from SB3)."""
+
+    def __init__(self, observation_space: spaces.Box, features_dim: int = 256):
+        super().__init__(observation_space, features_dim)
+        n_input_channels = int(observation_space.shape[0])
+        self.cnn = nn.Sequential(
+            nn.Conv2d(n_input_channels, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+        with th.no_grad():
+            sample = th.zeros(1, n_input_channels, ROWS, COLS)
+            n_flatten = self.cnn(sample).shape[1]
+        self.linear = nn.Sequential(
+            nn.Linear(n_flatten, features_dim),
+            nn.ReLU(),
+        )
+
+    def forward(self, observations: th.Tensor) -> th.Tensor:
+        return self.linear(self.cnn(observations))
+
+
+class DoubleDQN(DQN):
+    """DQN with Double-Q target: online net selects, target net evaluates."""
+
+    def train(self, gradient_steps: int, batch_size: int = 100) -> None:
+        self.policy.set_training_mode(True)
+        self._update_learning_rate(self.policy.optimizer)
+
+        losses = []
+        for _ in range(gradient_steps):
+            replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)  # type: ignore[union-attr]
+            discounts = (
+                replay_data.discounts if replay_data.discounts is not None else self.gamma
+            )
+
+            with th.no_grad():
+                next_q_online = self.q_net(replay_data.next_observations)
+                next_actions = next_q_online.argmax(dim=1, keepdim=True)
+                next_q_values = th.gather(
+                    self.q_net_target(replay_data.next_observations),
+                    dim=1,
+                    index=next_actions,
+                )
+                next_q_values = next_q_values.reshape(-1, 1)
+                target_q_values = (
+                    replay_data.rewards
+                    + (1 - replay_data.dones) * discounts * next_q_values
+                )
+
+            current_q_values = self.q_net(replay_data.observations)
+            current_q_values = th.gather(
+                current_q_values, dim=1, index=replay_data.actions.long()
+            )
+
+            loss = F.smooth_l1_loss(current_q_values, target_q_values)
+            losses.append(loss.item())
+
+            self.policy.optimizer.zero_grad()
+            loss.backward()
+            th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            self.policy.optimizer.step()
+
+        self._n_updates += gradient_steps
+        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
+        self.logger.record("train/loss", np.mean(losses))
 
 
 def _make_env_fn(
     seed: int = 0,
+    frame_skip: int = FRAME_SKIP,
     reward_mushroom_hit: int = 1,
     reward_mushroom_destroy: int = 5,
     reward_body_hit: int = 10,
@@ -50,6 +166,7 @@ def _make_env_fn(
     def _thunk():
         env = CentipedeEnv(
             render_mode=None,
+            frame_skip=frame_skip,
             reward_mushroom_hit=reward_mushroom_hit,
             reward_mushroom_destroy=reward_mushroom_destroy,
             reward_body_hit=reward_body_hit,
@@ -72,6 +189,7 @@ def _make_env_fn(
 def make_vec_env(
     n_envs: int = 1,
     seed: int = 0,
+    frame_skip: int = FRAME_SKIP,
     reward_mushroom_hit: int = 1,
     reward_mushroom_destroy: int = 5,
     reward_body_hit: int = 10,
@@ -86,6 +204,7 @@ def make_vec_env(
     proximity_distance_tiles: int = 3,
 ):
     kwargs = dict(
+        frame_skip=frame_skip,
         reward_mushroom_hit=reward_mushroom_hit,
         reward_mushroom_destroy=reward_mushroom_destroy,
         reward_body_hit=reward_body_hit,
@@ -110,7 +229,7 @@ def _emit(obj: dict) -> None:
 
 
 def _run_parallel_eval(
-    model: DQN,
+    model: DoubleDQN,
     n_eval_episodes: int,
     env_kwargs: dict,
     seed: int,
@@ -240,6 +359,7 @@ def train(
     exploration_fraction: float = 0.1,
     exploration_final_eps: float = 0.01,
     net_arch: list[int] | None = None,
+    eval_freq: int = 30_000,
     reward_mushroom_hit: int = 1,
     reward_mushroom_destroy: int = 5,
     reward_body_hit: int = 10,
@@ -266,9 +386,8 @@ def train(
         device = "cpu"
     _emit({"type": "device", "device": device})
 
-    env = make_vec_env(
-        n_envs=n_envs,
-        seed=seed,
+    env_kwargs: dict[str, Any] = dict(
+        frame_skip=FRAME_SKIP,
         reward_mushroom_hit=reward_mushroom_hit,
         reward_mushroom_destroy=reward_mushroom_destroy,
         reward_body_hit=reward_body_hit,
@@ -282,20 +401,8 @@ def train(
         reward_proximity_penalty=reward_proximity_penalty,
         proximity_distance_tiles=proximity_distance_tiles,
     )
-    env_kwargs = dict(
-        reward_mushroom_hit=reward_mushroom_hit,
-        reward_mushroom_destroy=reward_mushroom_destroy,
-        reward_body_hit=reward_body_hit,
-        reward_head_hit=reward_head_hit,
-        reward_depth_discount=reward_depth_discount,
-        reward_depth_discount_fn=reward_depth_discount_fn,
-        reward_spider_hit=reward_spider_hit,
-        reward_spider_penalty=reward_spider_penalty,
-        reward_centipede_penalty=reward_centipede_penalty,
-        reward_survival=reward_survival,
-        reward_proximity_penalty=reward_proximity_penalty,
-        proximity_distance_tiles=proximity_distance_tiles,
-    )
+
+    env = make_vec_env(n_envs=n_envs, seed=seed, **env_kwargs)
 
     checkpoint_cb = CheckpointCallback(
         save_freq=100_000,
@@ -305,14 +412,14 @@ def train(
     )
     progress_cb = ProgressCallback(total_timesteps)
     eval_cb = EvalProgressCallback(
-        eval_freq=100_000,
+        eval_freq=eval_freq,
         n_eval_episodes=10,
         env_kwargs=env_kwargs,
         seed=seed,
     )
 
-    model = DQN(
-        policy="MlpPolicy",
+    model = DoubleDQN(
+        policy="CnnPolicy",
         env=env,
         learning_rate=learning_rate,
         buffer_size=buffer_size,
@@ -325,7 +432,12 @@ def train(
         target_update_interval=target_update_interval,
         exploration_fraction=exploration_fraction,
         exploration_final_eps=exploration_final_eps,
-        policy_kwargs={"net_arch": net_arch},
+        policy_kwargs={
+            "features_extractor_class": GridCNN,
+            "features_extractor_kwargs": {"features_dim": 256},
+            "net_arch": net_arch,
+            "normalize_images": True,
+        },
         device=device,
         verbose=0,
         seed=seed,
@@ -361,7 +473,9 @@ if __name__ == "__main__":
     parser.add_argument("--exploration-fraction", type=float, default=0.1)
     parser.add_argument("--exploration-final-eps", type=float, default=0.01)
     parser.add_argument("--net-arch", type=str, default="256,256",
-                        help="Comma-separated hidden layer sizes, e.g. 256,256")
+                        help="Comma-separated MLP head layer sizes after CNN, e.g. 256,256")
+    parser.add_argument("--eval-freq", type=int, default=30_000,
+                        help="Run eval games every N training steps (default: 30000)")
     parser.add_argument("--reward-mushroom-hit", type=int, default=1)
     parser.add_argument("--reward-mushroom-destroy", type=int, default=5)
     parser.add_argument("--reward-body-hit", type=int, default=10)
@@ -392,6 +506,7 @@ if __name__ == "__main__":
         exploration_fraction=args.exploration_fraction,
         exploration_final_eps=args.exploration_final_eps,
         net_arch=[int(x) for x in args.net_arch.split(",")],
+        eval_freq=args.eval_freq,
         reward_mushroom_hit=args.reward_mushroom_hit,
         reward_mushroom_destroy=args.reward_mushroom_destroy,
         reward_body_hit=args.reward_body_hit,

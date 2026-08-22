@@ -52,24 +52,25 @@ Reward values are constructor params (also settable per-run from the GUI):
 
 Standard `gymnasium.Env` wrapper.
 
-- **Observation space:** `Box(low=-inf, high=inf, shape=(105,), dtype=float32)` — entity-centric vector (see `core/game.py` docstring for full layout: 12 segment slots × 7 features, bullet × 3, 2 spider slots × 5 features, 8-way lidar)
+- **Observation space:** `Box(0, 255, shape=(31, 30, 20), dtype=uint8)` — 4 stacked occupancy frames × 5 channels (player, mushrooms, centipede heads, centipede body, spiders). Each channel encodes fractional tile occupancy (0–255).
+- **Action repeat:** agent picks one action every 4 game frames (`frame_skip=4` for training/watch; `frame_skip=1` for human play). Rewards are summed across repeated frames.
 - **Action space:** `Discrete(6)` — NOOP / LEFT / RIGHT / UP / DOWN / FIRE
-- **Reward:** score delta per step
+- **Reward:** score delta per agent step (includes survival bonus and proximity shaping)
 - **Terminated:** player loses all 3 lives
-- **`step()` info dict:** `{"score": int, "lives": int, "segments_destroyed": int}`
+- **`step()` info dict:** `{"score": int, "lives": int, "segments_destroyed": int, "spiders_destroyed": int}`
 
 ---
 
-## core/train.py — DQN Training
+## core/train.py — Double DQN Training
 
-Runs `DQN` (MlpPolicy, default `[256, 256]`) via Stable-Baselines3. 
+Runs `DoubleDQN` (`CnnPolicy` with custom `GridCNN` feature extractor + MLP head) via Stable-Baselines3.
 Spawned as a subprocess by the GUI; communicates progress via newline-delimited JSON on stdout.
 
 Uses `SubprocVecEnv` (default 4 parallel workers) to collect experience concurrently across multiple processes, keeping the GPU fed. Falls back to `DummyVecEnv` when `n_envs=1`.
 
 **Callbacks:**
 - `CheckpointCallback` — saves `models/dqn_centipede_ckpt_<N>_steps.zip` every 100k steps
-- `EvalCallback` — after each checkpoint, runs 10 deterministic games on a separate eval env and emits results
+- `EvalProgressCallback` — runs 10 deterministic games on a separate eval env every `eval-freq` steps (default 30k) and emits results
 - `ProgressCallback` — emits progress stats every 5k steps
 
 **stdout message types:**
@@ -79,7 +80,7 @@ Uses `SubprocVecEnv` (default 4 parallel workers) to collect experience concurre
 | `device` | `device` | startup |
 | `start` | `total` | before `model.learn()` |
 | `progress` | `steps`, `total`, `pct`, `elapsed`, `eta`, `steps_per_sec` | every 5k steps |
-| `eval` | `steps`, `episodes: [{score, segments_destroyed}, …]` | every 100k steps (10 games) |
+| `eval` | `steps`, `episodes: [{score, segments_destroyed}, …]` | every `eval-freq` steps (default 30k, 10 games) |
 | `done` | `elapsed` | training complete |
 | `log` | `text` | non-JSON lines (errors, SB3 output) |
 
@@ -89,13 +90,15 @@ Uses `SubprocVecEnv` (default 4 parallel workers) to collect experience concurre
 
 Loads a saved model and runs it visually for N episodes in a pygame window.  
 Prints `score` and `total_reward` per episode to stdout.  
-Usage: `uv run python -m core.watch [--model PATH] [--episodes N] [--fps N]`
+The launcher **Watch Agent** tab lists the final model and all checkpoints (`dqn_centipede_ckpt_*_steps.zip`); selection is persisted in `settings.json` as `watch-model`.  
+Usage: `uv run python -m core.watch [--model PATH] [--episodes N] [--fps N]`  
+`PATH` is without `.zip` (e.g. `models/dqn_centipede_ckpt_300000_steps`).
 
 ---
 
 ## core/play.py
 
-Human-playable runner. Boots `CentipedeEnv(render_mode="human")` and maps keyboard input to actions each frame. Press `R` to restart after game over.  
+Human-playable runner. Boots `CentipedeEnv(render_mode="human", frame_skip=1)` and maps keyboard input to actions each frame. Press `R` to restart after game over.  
 Keys: arrow keys or WASD to move, Space to fire.
 
 ---

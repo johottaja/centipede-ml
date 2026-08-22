@@ -16,8 +16,9 @@ SPECS: list[tuple] = [
     ("Timesteps",              "timesteps",              "100000", "int",   1,    None, "Total environment steps to train for"),
     ("Parallel envs",          "n-envs",                 "4",       "int",   1,    None, "Number of parallel environments (SubprocVecEnv); more envs = faster experience collection"),
     ("Seed",                   "seed",                   "0",       "int",   0,    None, "Random seed for reproducibility"),
+    ("Eval frequency",         "eval-freq",              "30000",   "int",   1,    None, "Run 10 deterministic eval games every N training steps"),
 
-    ("section", "DQN"),
+    ("section", "DDQN / CNN"),
     ("Learning rate",          "learning-rate",          "0.0001",  "float", 0,    1,    "Adam optimizer learning rate"),
     ("Buffer size",            "buffer-size",            "100000",  "int",   1,    None, "Replay buffer capacity"),
     ("Learning starts",        "learning-starts",        "10000",   "int",   0,    None, "Steps before first gradient update"),
@@ -29,7 +30,7 @@ SPECS: list[tuple] = [
     ("Target update interval", "target-update-interval", "1000",    "int",   1,    None, "Steps between target network syncs"),
     ("Exploration fraction",   "exploration-fraction",   "0.1",     "float", 0,    1,    "Fraction of training spent exploring"),
     ("Final epsilon",          "exploration-final-eps",  "0.01",    "float", 0,    1,    "Epsilon at end of exploration schedule"),
-    ("Net architecture",       "net-arch",               "256,256", "str",   None, None, "Hidden layer sizes, comma-separated (e.g. 256,256)"),
+    ("Net architecture",       "net-arch",               "256,256", "str",   None, None, "MLP head layer sizes after CNN, comma-separated (e.g. 256,256)"),
 
     ("section", "Rewards"),
     ("Mushroom hit",           "reward-mushroom-hit",     "1",      "int",   0,    None, "Reward for hitting a mushroom without destroying it"),
@@ -115,7 +116,14 @@ class HParamPanel(tk.Frame):
             self._vars[key].set(default)
 
     def save(self, path: str = SETTINGS_PATH) -> None:
-        data = {key: var.get() for key, var in self._vars.items()}
+        data: dict = {}
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        data.update({key: var.get() for key, var in self._vars.items()})
         try:
             with open(path, "w") as f:
                 json.dump(data, f, indent=2)

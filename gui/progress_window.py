@@ -42,7 +42,8 @@ class EvalScoreChart(tk.Canvas):
     _MARGIN_TOP = 16
     _MARGIN_BOTTOM = 28
 
-    def __init__(self, parent: tk.Widget, width: int = 420, height: int = 180, **kwargs):
+    def __init__(self, parent: tk.Widget, width: int = 420, height: int = 180,
+                 eval_freq: int = 30_000, **kwargs):
         super().__init__(
             parent,
             width=width,
@@ -52,6 +53,7 @@ class EvalScoreChart(tk.Canvas):
             highlightbackground="#cccccc",
             **kwargs,
         )
+        self._eval_freq = eval_freq
         self._points: list[tuple[int, float]] = []
         self.bind("<Configure>", self._on_resize)
 
@@ -84,7 +86,7 @@ class EvalScoreChart(tk.Canvas):
         if not self._points:
             self.create_text(
                 w // 2, (plot_t + plot_b) // 2,
-                text="Waiting for first evaluation at 100k steps…",
+                text=f"Waiting for first evaluation at {_fmt_steps(self._eval_freq)} steps…",
                 font=("TkDefaultFont", 9),
                 fill="#888888",
             )
@@ -144,9 +146,11 @@ class ProgressWindow(tk.Toplevel):
 
     _POLL_MS = 300
 
-    def __init__(self, parent: tk.Tk, cmd: list[str], on_done: Callable[[], None]):
+    def __init__(self, parent: tk.Tk, cmd: list[str], on_done: Callable[[], None],
+                 eval_freq: int = 30_000):
         super().__init__(parent)
         self.title("Training in progress")
+        self._eval_freq = eval_freq
         self.resizable(True, True)
         self.minsize(420, 520)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -197,7 +201,7 @@ class ProgressWindow(tk.Toplevel):
             tk.Label(grid, textvariable=var, anchor="w",
                      font=("TkDefaultFont", 10, "bold")).grid(row=i, column=1, sticky="w", padx=(8, 0), pady=2)
 
-        self._chart = EvalScoreChart(outer, height=180)
+        self._chart = EvalScoreChart(outer, height=180, eval_freq=self._eval_freq)
         self._chart.pack(fill="both", expand=True, pady=(4, 16))
 
         self._cancel_btn = tk.Button(outer, text="Cancel Training", width=20, command=self._on_close)

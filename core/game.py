@@ -589,7 +589,85 @@ class GameEngine:
         return -worst
 
     # ------------------------------------------------------------------
-    # Grid observation encoding
+    # Occupancy-grid observation (5 channels, float32 in [0, 1])
+    #   0 = player   1 = mushrooms   2 = centipede heads
+    #   3 = centipede body   4 = spiders
+    OCCUPANCY_CHANNELS = 5
+    CH_PLAYER = 0
+    CH_MUSHROOM = 1
+    CH_HEAD = 2
+    CH_BODY = 3
+    CH_SPIDER = 4
+    _TILE_AREA = float(TILE * TILE)
+
+    @staticmethod
+    def _stamp_rect_occupancy(
+        channel: np.ndarray,
+        left: int,
+        top: int,
+        right: int,
+        bottom: int,
+    ) -> None:
+        """Add fractional tile occupancy for an axis-aligned pixel rect."""
+        c0 = max(0, left // TILE)
+        c1 = min(COLS - 1, max(0, right - 1) // TILE)
+        r0 = max(0, top // TILE)
+        r1 = min(ROWS - 1, max(0, bottom - 1) // TILE)
+        for row in range(r0, r1 + 1):
+            tile_top = row * TILE
+            tile_bottom = tile_top + TILE
+            oy0 = max(top, tile_top)
+            oy1 = min(bottom, tile_bottom)
+            overlap_h = oy1 - oy0
+            if overlap_h <= 0:
+                continue
+            for col in range(c0, c1 + 1):
+                tile_left = col * TILE
+                tile_right = tile_left + TILE
+                ox0 = max(left, tile_left)
+                ox1 = min(right, tile_right)
+                overlap_w = ox1 - ox0
+                if overlap_w > 0:
+                    channel[row, col] += (overlap_w * overlap_h) / GameEngine._TILE_AREA
+
+    def get_occupancy_obs(self, out: np.ndarray | None = None) -> np.ndarray:
+        """Build a 5-channel occupancy grid, shape (5, ROWS, COLS), float32 in [0, 1].
+
+        Each channel scores tiles by the fraction of the tile area covered by
+        that entity type. Values are clipped to 1.0 per channel.
+        """
+        if out is None:
+            out = np.zeros((self.OCCUPANCY_CHANNELS, ROWS, COLS), dtype=np.float32)
+        else:
+            out[:] = 0.0
+
+        for m in self.field.grid.values():
+            out[self.CH_MUSHROOM, m.row, m.col] = 1.0
+
+        for chain in self.centipedes:
+            for seg in chain.segments:
+                r = seg.rect
+                ch = self.CH_HEAD if seg.is_head else self.CH_BODY
+                self._stamp_rect_occupancy(out[ch], r.left, r.top, r.right, r.bottom)
+
+        for s in self._spider_mgr.spiders:
+            if s.alive:
+                r = s.rect
+                self._stamp_rect_occupancy(
+                    out[self.CH_SPIDER], r.left, r.top, r.right, r.bottom
+                )
+
+        if not self.terminated:
+            r = self.player.rect
+            self._stamp_rect_occupancy(
+                out[self.CH_PLAYER], r.left, r.top, r.right, r.bottom
+            )
+
+        np.clip(out, 0.0, 1.0, out=out)
+        return out
+
+    # ------------------------------------------------------------------
+    # Grid observation encoding (legacy discrete grid)
     # 0=empty  1=mushroom  2=centipede body  3=centipede head
     # 4=player  5=bullet  6=spider
     GRID_EMPTY = 0

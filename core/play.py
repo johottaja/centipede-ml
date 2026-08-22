@@ -27,7 +27,7 @@ def keys_to_action(keys) -> int:
 
 
 def main():
-    env = CentipedeEnv(render_mode="human")
+    env = CentipedeEnv(render_mode="human", frame_skip=1)
     env.reset()
 
     while True:
