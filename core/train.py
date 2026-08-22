@@ -404,8 +404,9 @@ def train(
 
     env = make_vec_env(n_envs=n_envs, seed=seed, **env_kwargs)
 
+    # save_freq is per vec-env step; divide by n_envs to hit every 100k timesteps
     checkpoint_cb = LoggingCheckpointCallback(
-        save_freq=100_000,
+        save_freq=max(100_000 // n_envs, 1),
         save_path=MODEL_DIR,
         name_prefix="dqn_centipede_ckpt",
         verbose=0,
