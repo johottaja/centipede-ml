@@ -5,7 +5,8 @@ import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from .hparam_panel import HParamPanel, SETTINGS_PATH
+from core.hparams import SETTINGS_PATH
+from .hparam_panel import HParamPanel
 from .progress_window import ProgressWindow
 from core.train import MODEL_PATH, list_saved_models
 

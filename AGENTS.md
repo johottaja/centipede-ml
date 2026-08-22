@@ -67,6 +67,8 @@ Runs `C51` (Categorical DQN with `C51Policy` + custom `GridCNN` feature extracto
 Each action-value is a categorical distribution over `n_atoms` (default 51) support points in `[v_min, v_max]`.
 Spawned as a subprocess by the GUI; communicates progress via newline-delimited JSON on **stdout** (for the progress window). Human-readable logs (eval scores, progress, checkpoints) go to **stderr** — use `--quiet` for JSON-only output.
 
+CLI usage loads hyperparameters from `settings.json` by default (`--settings PATH` to override). Any CLI flag overrides the corresponding settings value.
+
 Uses `SubprocVecEnv` (default 4 parallel workers) to collect experience concurrently across multiple processes, keeping the GPU fed. Falls back to `DummyVecEnv` when `n_envs=1`.
 
 **Callbacks:**

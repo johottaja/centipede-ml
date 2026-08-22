@@ -26,6 +26,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 
 from core.c51 import C51, C51Policy
 from core.env import CentipedeEnv
+from core.hparams import SETTINGS_PATH, load_settings_defaults
 from core.networks import GridCNN
 
 MODEL_DIR = "models"
@@ -466,47 +467,63 @@ def train(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--timesteps", type=int, default=1_000_000)
-    parser.add_argument("--n-envs", type=int, default=4)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--buffer-size", type=int, default=100_000)
-    parser.add_argument("--learning-starts", type=int, default=10_000)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--tau", type=float, default=1.0)
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--train-freq", type=int, default=4)
-    parser.add_argument("--gradient-steps", type=int, default=1)
-    parser.add_argument("--target-update-interval", type=int, default=1_000)
-    parser.add_argument("--exploration-fraction", type=float, default=0.1)
-    parser.add_argument("--exploration-final-eps", type=float, default=0.01)
-    parser.add_argument("--net-arch", type=str, default="256,256",
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument(
+        "--settings",
+        default=SETTINGS_PATH,
+        help=f"Path to settings JSON (default: {SETTINGS_PATH})",
+    )
+    pre_args, remaining = pre_parser.parse_known_args()
+    settings_defaults = load_settings_defaults(pre_args.settings)
+
+    parser = argparse.ArgumentParser(
+        parents=[pre_parser],
+        description="Train a C51 agent. Loads hyperparameters from settings.json; "
+                    "CLI flags override.",
+    )
+    parser.add_argument("--timesteps", type=int)
+    parser.add_argument("--n-envs", type=int)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--learning-rate", type=float)
+    parser.add_argument("--buffer-size", type=int)
+    parser.add_argument("--learning-starts", type=int)
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--tau", type=float)
+    parser.add_argument("--gamma", type=float)
+    parser.add_argument("--train-freq", type=int)
+    parser.add_argument("--gradient-steps", type=int)
+    parser.add_argument("--target-update-interval", type=int)
+    parser.add_argument("--exploration-fraction", type=float)
+    parser.add_argument("--exploration-final-eps", type=float)
+    parser.add_argument("--net-arch", type=str,
                         help="Comma-separated MLP head layer sizes after CNN, e.g. 256,256")
-    parser.add_argument("--eval-freq", type=int, default=30_000,
+    parser.add_argument("--eval-freq", type=int,
                         help="Run eval games every N training steps (default: 30000)")
-    parser.add_argument("--n-atoms", type=int, default=51,
+    parser.add_argument("--n-atoms", type=int,
                         help="Number of atoms for C51 return distribution (default: 51)")
-    parser.add_argument("--v-min", type=float, default=-10_000.0,
+    parser.add_argument("--v-min", type=float,
                         help="Minimum support value for C51 atoms")
-    parser.add_argument("--v-max", type=float, default=10_000.0,
+    parser.add_argument("--v-max", type=float,
                         help="Maximum support value for C51 atoms")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress human-readable logs on stderr (JSON stdout only)")
-    parser.add_argument("--reward-mushroom-hit", type=int, default=1)
-    parser.add_argument("--reward-mushroom-destroy", type=int, default=5)
-    parser.add_argument("--reward-body-hit", type=int, default=10)
-    parser.add_argument("--reward-head-hit", type=int, default=100)
-    parser.add_argument("--reward-depth-discount", type=float, default=0.0)
-    parser.add_argument("--reward-depth-discount-fn", type=str, default="linear",
+    parser.add_argument("--reward-mushroom-hit", type=int)
+    parser.add_argument("--reward-mushroom-destroy", type=int)
+    parser.add_argument("--reward-body-hit", type=int)
+    parser.add_argument("--reward-head-hit", type=int)
+    parser.add_argument("--reward-depth-discount", type=float)
+    parser.add_argument("--reward-depth-discount-fn", type=str,
                         choices=["linear", "exponential"])
-    parser.add_argument("--reward-spider-hit", type=int, default=300)
-    parser.add_argument("--reward-spider-penalty", type=int, default=1000)
-    parser.add_argument("--reward-centipede-penalty", type=int, default=1000)
-    parser.add_argument("--reward-survival", type=float, default=0.01)
-    parser.add_argument("--reward-proximity-penalty", type=float, default=1.0)
-    parser.add_argument("--proximity-distance-tiles", type=int, default=3)
-    args = parser.parse_args()
+    parser.add_argument("--reward-spider-hit", type=int)
+    parser.add_argument("--reward-spider-penalty", type=int)
+    parser.add_argument("--reward-centipede-penalty", type=int)
+    parser.add_argument("--reward-survival", type=float)
+    parser.add_argument("--reward-proximity-penalty", type=float)
+    parser.add_argument("--proximity-distance-tiles", type=int)
+    parser.set_defaults(**settings_defaults)
+    args = parser.parse_args(remaining)
+    if not args.quiet:
+        _log(f"loaded settings from {pre_args.settings}")
     train(
         total_timesteps=args.timesteps,
         n_envs=args.n_envs,
