@@ -5,7 +5,7 @@ Observation : uint8 occupancy grid, shape (ROWS, COLS, OCCUPANCY_CHANNELS * fram
               Each frame contributes 5 channels (player, mushrooms, heads, body, spiders)
               with values 0–255 encoding fractional tile occupancy.
               Default frame_skip=4 stacks 4 consecutive frames → shape (31, 30, 20).
-Action space: Discrete(6)  – see game.ACTION_* constants
+Action space: Discrete(10) – 5 moves (NOOP/L/R/U/D) × fire on/off
 Reward       : score delta per agent step (summed across repeated frames)
 Terminated   : player loses all lives
 """

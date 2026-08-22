@@ -7,7 +7,7 @@ import pygame
 from core.env import CentipedeEnv
 from core.game import (
     ACTION_NOOP, ACTION_LEFT, ACTION_RIGHT, ACTION_UP, ACTION_DOWN,
-    ACTION_FIRE,
+    NUM_MOVES,
 )
 
 
@@ -18,12 +18,17 @@ def keys_to_action(keys) -> int:
     down  = keys[pygame.K_DOWN]  or keys[pygame.K_s]
     fire  = keys[pygame.K_SPACE]
 
-    if fire:           return ACTION_FIRE
-    if left:           return ACTION_LEFT
-    if right:          return ACTION_RIGHT
-    if up:             return ACTION_UP
-    if down:           return ACTION_DOWN
-    return ACTION_NOOP
+    if left and not right:
+        move = ACTION_LEFT
+    elif right and not left:
+        move = ACTION_RIGHT
+    elif up and not down:
+        move = ACTION_UP
+    elif down and not up:
+        move = ACTION_DOWN
+    else:
+        move = ACTION_NOOP
+    return move + (NUM_MOVES if fire else 0)
 
 
 def main():

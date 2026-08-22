@@ -42,13 +42,24 @@ SPIDER_DIR_CHANGE_INTERVAL = 30  # frames between random direction changes
 # ---------------------------------------------------------------------------
 # Action constants  (used by the gym env and the human runner)
 # ---------------------------------------------------------------------------
+# Move is action % NUM_MOVES; fire is action >= NUM_MOVES.
+# 0–4: NOOP / LEFT / RIGHT / UP / DOWN
+# 5–9: the same moves while firing
 ACTION_NOOP = 0
 ACTION_LEFT = 1
 ACTION_RIGHT = 2
 ACTION_UP = 3
 ACTION_DOWN = 4
-ACTION_FIRE = 5
-NUM_ACTIONS = 6
+NUM_MOVES = 5
+ACTION_FIRE = NUM_MOVES + ACTION_NOOP  # stand still and shoot (legacy alias)
+NUM_ACTIONS = NUM_MOVES * 2
+
+
+def decode_action(action: int) -> tuple[int, bool]:
+    """Split a discrete action into (move, fire)."""
+    fire = action >= NUM_MOVES
+    move = action % NUM_MOVES
+    return move, fire
 
 
 # ---------------------------------------------------------------------------
@@ -314,20 +325,22 @@ class Player:
         return pygame.Rect(self.x, self.y, TILE, TILE)
 
     def apply_action(self, action: int):
-        """Move and optionally fire based on a discrete action integer."""
-        if action == ACTION_LEFT:
+        """Move (and tick the fire cooldown) based on a discrete action integer."""
+        move, _ = decode_action(action)
+        if move == ACTION_LEFT:
             self.x = max(0, self.x - PLAYER_SPEED)
-        if action == ACTION_RIGHT:
+        elif move == ACTION_RIGHT:
             self.x = min(WIDTH - TILE, self.x + PLAYER_SPEED)
-        if action == ACTION_UP:
+        elif move == ACTION_UP:
             self.y = max(PLAYER_ZONE_TOP * TILE, self.y - PLAYER_SPEED)
-        if action == ACTION_DOWN:
+        elif move == ACTION_DOWN:
             self.y = min(HEIGHT - TILE, self.y + PLAYER_SPEED)
         if self.cooldown > 0:
             self.cooldown -= 1
 
     def wants_fire(self, action: int) -> bool:
-        return action == ACTION_FIRE
+        _, fire = decode_action(action)
+        return fire
 
     def shoot(self):
         if self.cooldown > 0:
@@ -409,9 +422,19 @@ class GameEngine:
 
     # ------------------------------------------------------------------
     def _spawn_centipede(self):
-        start_x = (COLS // 2) * TILE
-        segs = [Segment(start_x - i * TILE, 0, is_head=(i == 0))
-                for i in range(CENTIPEDE_LENGTH)]
+        # Head at a random top-row column; body trails opposite the initial heading
+        # so standing in the player spawn lane is not a free opening shot.
+        heading = self._rng.choice((-1, 1))
+        if heading > 0:
+            head_col = self._rng.randint(CENTIPEDE_LENGTH - 1, COLS - 1)
+        else:
+            head_col = self._rng.randint(0, COLS - CENTIPEDE_LENGTH)
+        segs = []
+        for i in range(CENTIPEDE_LENGTH):
+            col = head_col - i * heading
+            seg = Segment(col * TILE, 0, is_head=(i == 0))
+            seg.dir = heading
+            segs.append(seg)
         self.centipedes.append(Centipede(segs))
 
     # ------------------------------------------------------------------
