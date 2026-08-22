@@ -64,7 +64,7 @@ Standard `gymnasium.Env` wrapper.
 ## core/train.py — Double DQN Training
 
 Runs `DoubleDQN` (`CnnPolicy` with custom `GridCNN` feature extractor + MLP head) via Stable-Baselines3.
-Spawned as a subprocess by the GUI; communicates progress via newline-delimited JSON on stdout.
+Spawned as a subprocess by the GUI; communicates progress via newline-delimited JSON on **stdout** (for the progress window). Human-readable logs (eval scores, progress, checkpoints) go to **stderr** — use `--quiet` for JSON-only output.
 
 Uses `SubprocVecEnv` (default 4 parallel workers) to collect experience concurrently across multiple processes, keeping the GPU fed. Falls back to `DummyVecEnv` when `n_envs=1`.
 

@@ -5,17 +5,15 @@ Observation: uint8 occupancy grid (31, 30, 20) — 4 stacked frames × 5 channel
 Policy: CnnPolicy with a small custom CNN + MLP head.
 The trained model is saved to models/dqn_centipede.zip.
 
-Progress is emitted to stdout as newline-delimited JSON objects:
-  {"type": "progress", "steps": N, "total": T, "pct": P, "elapsed": S, "eta": S, "steps_per_sec": F}
-  {"type": "eval", "steps": N, "episodes": [...], "mean_score": S}
-  {"type": "done", "elapsed": S}
-  {"type": "error", "message": "..."}
+Progress is emitted to stdout as newline-delimited JSON (for the GUI progress window).
+Human-readable status lines are written to stderr when not using --quiet.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import sys
 import time
 from typing import Any
 
@@ -228,6 +226,50 @@ def _emit(obj: dict) -> None:
     print(json.dumps(obj), flush=True)
 
 
+_quiet = False
+
+
+def _log(msg: str) -> None:
+    if not _quiet:
+        print(msg, file=sys.stderr, flush=True)
+
+
+def _fmt_duration(seconds: float) -> str:
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {sec:02d}s"
+    if m:
+        return f"{m}m {sec:02d}s"
+    return f"{sec}s"
+
+
+def _log_eval(steps: int, episodes: list[dict]) -> None:
+    if not episodes:
+        _log(f"eval @ {steps:,} steps — no episodes recorded")
+        return
+    scores = [ep["score"] for ep in episodes]
+    segs = [ep["segments_destroyed"] for ep in episodes]
+    spiders = [ep["spiders_destroyed"] for ep in episodes]
+    mean_score = sum(scores) / len(scores)
+    mean_segs = sum(segs) / len(segs)
+    mean_spiders = sum(spiders) / len(spiders)
+    _log(
+        f"eval @ {steps:,} steps | "
+        f"mean score {mean_score:,.1f} | "
+        f"avg segments {mean_segs:.1f} | "
+        f"avg spiders {mean_spiders:.1f} | "
+        f"min/max score {min(scores):,.1f}/{max(scores):,.1f}"
+    )
+    for i, ep in enumerate(episodes, 1):
+        _log(
+            f"  game {i:2d}: score {ep['score']:,.1f}  "
+            f"segments {ep['segments_destroyed']}  "
+            f"spiders {ep['spiders_destroyed']}"
+        )
+
+
 def _run_parallel_eval(
     model: DoubleDQN,
     n_eval_episodes: int,
@@ -270,6 +312,18 @@ def _run_parallel_eval(
     return episodes
 
 
+class LoggingCheckpointCallback(CheckpointCallback):
+    """CheckpointCallback that logs saves to stderr."""
+
+    def _on_step(self) -> bool:
+        save_now = self.save_freq > 0 and self.n_calls % self.save_freq == 0
+        result = super()._on_step()
+        if save_now:
+            path = self._checkpoint_path(extension="zip")
+            _log(f"checkpoint saved @ {self.model.num_timesteps:,} steps → {path}")
+        return result
+
+
 class ProgressCallback(BaseCallback):
     def __init__(self, total_timesteps: int, emit_freq: int = 5_000):
         super().__init__()
@@ -298,6 +352,11 @@ class ProgressCallback(BaseCallback):
                 "eta": round(eta, 1),
                 "steps_per_sec": round(sps, 1),
             })
+            _log(
+                f"progress | {self.num_timesteps:,} / {self.total_timesteps:,} "
+                f"({pct * 100:.1f}%) | {sps:,.0f} steps/s | "
+                f"elapsed {_fmt_duration(elapsed)} | eta {_fmt_duration(eta)}"
+            )
         return True
 
 
@@ -325,6 +384,7 @@ class EvalProgressCallback(BaseCallback):
         return True
 
     def _run_eval(self) -> None:
+        _log(f"running eval ({self.n_eval_episodes} games) @ {self.num_timesteps:,} steps…")
         episodes = _run_parallel_eval(
             self.model,
             self.n_eval_episodes,
@@ -335,12 +395,21 @@ class EvalProgressCallback(BaseCallback):
         mean_score = round(
             sum(ep["score"] for ep in episodes) / max(1, len(episodes)), 1
         )
+        mean_segments = round(
+            sum(ep["segments_destroyed"] for ep in episodes) / max(1, len(episodes)), 1
+        )
+        mean_spiders = round(
+            sum(ep["spiders_destroyed"] for ep in episodes) / max(1, len(episodes)), 1
+        )
         _emit({
             "type": "eval",
             "steps": self.num_timesteps,
             "episodes": episodes,
             "mean_score": mean_score,
+            "mean_segments_destroyed": mean_segments,
+            "mean_spiders_destroyed": mean_spiders,
         })
+        _log_eval(self.num_timesteps, episodes)
 
 
 def train(
@@ -372,7 +441,11 @@ def train(
     reward_survival: float = 0.01,
     reward_proximity_penalty: float = 1.0,
     proximity_distance_tiles: int = 3,
+    quiet: bool = False,
 ) -> None:
+    global _quiet
+    _quiet = quiet
+
     if net_arch is None:
         net_arch = [256, 256]
 
@@ -385,6 +458,7 @@ def train(
     else:
         device = "cpu"
     _emit({"type": "device", "device": device})
+    _log(f"device: {device}")
 
     env_kwargs: dict[str, Any] = dict(
         frame_skip=FRAME_SKIP,
@@ -404,11 +478,11 @@ def train(
 
     env = make_vec_env(n_envs=n_envs, seed=seed, **env_kwargs)
 
-    checkpoint_cb = CheckpointCallback(
+    checkpoint_cb = LoggingCheckpointCallback(
         save_freq=100_000,
         save_path=MODEL_DIR,
         name_prefix="dqn_centipede_ckpt",
-        verbose=1,
+        verbose=0,
     )
     progress_cb = ProgressCallback(total_timesteps)
     eval_cb = EvalProgressCallback(
@@ -444,6 +518,10 @@ def train(
     )
 
     _emit({"type": "start", "total": total_timesteps})
+    _log(
+        f"training | {total_timesteps:,} steps | {n_envs} envs | "
+        f"eval every {eval_freq:,} steps | seed {seed}"
+    )
     t0 = time.monotonic()
     model.learn(
         total_timesteps=total_timesteps,
@@ -452,7 +530,9 @@ def train(
     )
 
     model.save(MODEL_PATH)
-    _emit({"type": "done", "elapsed": round(time.monotonic() - t0, 1)})
+    elapsed = round(time.monotonic() - t0, 1)
+    _emit({"type": "done", "elapsed": elapsed})
+    _log(f"done in {_fmt_duration(elapsed)} | saved {MODEL_PATH}.zip")
     env.close()
 
 
@@ -476,6 +556,8 @@ if __name__ == "__main__":
                         help="Comma-separated MLP head layer sizes after CNN, e.g. 256,256")
     parser.add_argument("--eval-freq", type=int, default=30_000,
                         help="Run eval games every N training steps (default: 30000)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress human-readable logs on stderr (JSON stdout only)")
     parser.add_argument("--reward-mushroom-hit", type=int, default=1)
     parser.add_argument("--reward-mushroom-destroy", type=int, default=5)
     parser.add_argument("--reward-body-hit", type=int, default=10)
@@ -507,6 +589,7 @@ if __name__ == "__main__":
         exploration_final_eps=args.exploration_final_eps,
         net_arch=[int(x) for x in args.net_arch.split(",")],
         eval_freq=args.eval_freq,
+        quiet=args.quiet,
         reward_mushroom_hit=args.reward_mushroom_hit,
         reward_mushroom_destroy=args.reward_mushroom_destroy,
         reward_body_hit=args.reward_body_hit,
