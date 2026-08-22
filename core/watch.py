@@ -1,5 +1,5 @@
 """
-Watch the trained Double DQN agent play Centipede.
+Watch the trained C51 agent play Centipede.
 
 Usage:
     uv run python -m core.watch [--model PATH] [--episodes N] [--fps N]
@@ -16,7 +16,8 @@ import os
 import pygame
 from core.env import CentipedeEnv
 from core.game import WIDTH, HEIGHT
-from core.train import MODEL_PATH, DoubleDQN, _make_env_fn, list_saved_models
+from core.c51 import C51
+from core.train import MODEL_PATH, _make_env_fn, list_saved_models
 
 
 def _pick_model_interactive() -> str | None:
@@ -42,14 +43,14 @@ def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> Non
         print(f"No model found at {model_path}.zip — train first.")
         return
 
-    model = DoubleDQN.load(model_path)
+    model = C51.load(model_path)
     print(f"Loaded model from {model_path}.zip")
 
     proc_env = _make_env_fn(seed=0)()
 
     pygame.init()
     window = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Centipede – DDQN Agent")
+    pygame.display.set_caption("Centipede – C51 Agent")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("monospace", 16)
     surf = pygame.Surface((WIDTH, HEIGHT))

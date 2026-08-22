@@ -1,8 +1,8 @@
 """
-Train a Double DQN agent on Centipede using Stable-Baselines3.
+Train a C51 (Categorical DQN) agent on Centipede using Stable-Baselines3.
 
 Observation: uint8 occupancy grid (31, 30, 20) — 4 stacked frames × 5 channels.
-Policy: CnnPolicy with a small custom CNN + MLP head.
+Policy: C51Policy with custom GridCNN feature extractor + distributional MLP head.
 The trained model is saved to models/dqn_centipede.zip.
 
 Progress is emitted to stdout as newline-delimited JSON (for the GUI progress window).
@@ -18,20 +18,15 @@ import time
 from typing import Any
 
 import numpy as np
-import torch as th
-import torch.nn as nn
-import torch.nn.functional as F
 import torch
-from gymnasium import spaces
-from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 
+from core.c51 import C51, C51Policy
 from core.env import CentipedeEnv
-from core.game import ROWS, COLS
+from core.networks import GridCNN
 
 MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "dqn_centipede")
@@ -69,79 +64,6 @@ def list_saved_models() -> list[tuple[str, str]]:
 
     entries.sort(key=lambda e: e[2], reverse=True)
     return [(path, label) for path, label, _ in entries]
-
-
-class GridCNN(BaseFeaturesExtractor):
-    """Small CNN for 31×30 occupancy grids (channels-first input from SB3)."""
-
-    def __init__(self, observation_space: spaces.Box, features_dim: int = 256):
-        super().__init__(observation_space, features_dim)
-        n_input_channels = int(observation_space.shape[0])
-        self.cnn = nn.Sequential(
-            nn.Conv2d(n_input_channels, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-        )
-        with th.no_grad():
-            sample = th.zeros(1, n_input_channels, ROWS, COLS)
-            n_flatten = self.cnn(sample).shape[1]
-        self.linear = nn.Sequential(
-            nn.Linear(n_flatten, features_dim),
-            nn.ReLU(),
-        )
-
-    def forward(self, observations: th.Tensor) -> th.Tensor:
-        return self.linear(self.cnn(observations))
-
-
-class DoubleDQN(DQN):
-    """DQN with Double-Q target: online net selects, target net evaluates."""
-
-    def train(self, gradient_steps: int, batch_size: int = 100) -> None:
-        self.policy.set_training_mode(True)
-        self._update_learning_rate(self.policy.optimizer)
-
-        losses = []
-        for _ in range(gradient_steps):
-            replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)  # type: ignore[union-attr]
-            discounts = (
-                replay_data.discounts if replay_data.discounts is not None else self.gamma
-            )
-
-            with th.no_grad():
-                next_q_online = self.q_net(replay_data.next_observations)
-                next_actions = next_q_online.argmax(dim=1, keepdim=True)
-                next_q_values = th.gather(
-                    self.q_net_target(replay_data.next_observations),
-                    dim=1,
-                    index=next_actions,
-                )
-                next_q_values = next_q_values.reshape(-1, 1)
-                target_q_values = (
-                    replay_data.rewards
-                    + (1 - replay_data.dones) * discounts * next_q_values
-                )
-
-            current_q_values = self.q_net(replay_data.observations)
-            current_q_values = th.gather(
-                current_q_values, dim=1, index=replay_data.actions.long()
-            )
-
-            loss = F.smooth_l1_loss(current_q_values, target_q_values)
-            losses.append(loss.item())
-
-            self.policy.optimizer.zero_grad()
-            loss.backward()
-            th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-            self.policy.optimizer.step()
-
-        self._n_updates += gradient_steps
-        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
-        self.logger.record("train/loss", np.mean(losses))
 
 
 def _make_env_fn(
@@ -271,7 +193,7 @@ def _log_eval(steps: int, episodes: list[dict]) -> None:
 
 
 def _run_parallel_eval(
-    model: DoubleDQN,
+    model: C51,
     n_eval_episodes: int,
     env_kwargs: dict,
     seed: int,
@@ -429,6 +351,9 @@ def train(
     exploration_final_eps: float = 0.01,
     net_arch: list[int] | None = None,
     eval_freq: int = 30_000,
+    n_atoms: int = 51,
+    v_min: float = -10_000.0,
+    v_max: float = 10_000.0,
     reward_mushroom_hit: int = 1,
     reward_mushroom_destroy: int = 5,
     reward_body_hit: int = 10,
@@ -492,8 +417,8 @@ def train(
         seed=seed,
     )
 
-    model = DoubleDQN(
-        policy="CnnPolicy",
+    model = C51(
+        policy=C51Policy,
         env=env,
         learning_rate=learning_rate,
         buffer_size=buffer_size,
@@ -511,6 +436,9 @@ def train(
             "features_extractor_kwargs": {"features_dim": 256},
             "net_arch": net_arch,
             "normalize_images": True,
+            "n_atoms": n_atoms,
+            "v_min": v_min,
+            "v_max": v_max,
         },
         device=device,
         verbose=0,
@@ -519,7 +447,8 @@ def train(
 
     _emit({"type": "start", "total": total_timesteps})
     _log(
-        f"training | {total_timesteps:,} steps | {n_envs} envs | "
+        f"training (C51) | {total_timesteps:,} steps | {n_envs} envs | "
+        f"{n_atoms} atoms [{v_min:,.0f}, {v_max:,.0f}] | "
         f"eval every {eval_freq:,} steps | seed {seed}"
     )
     t0 = time.monotonic()
@@ -556,6 +485,12 @@ if __name__ == "__main__":
                         help="Comma-separated MLP head layer sizes after CNN, e.g. 256,256")
     parser.add_argument("--eval-freq", type=int, default=30_000,
                         help="Run eval games every N training steps (default: 30000)")
+    parser.add_argument("--n-atoms", type=int, default=51,
+                        help="Number of atoms for C51 return distribution (default: 51)")
+    parser.add_argument("--v-min", type=float, default=-10_000.0,
+                        help="Minimum support value for C51 atoms")
+    parser.add_argument("--v-max", type=float, default=10_000.0,
+                        help="Maximum support value for C51 atoms")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress human-readable logs on stderr (JSON stdout only)")
     parser.add_argument("--reward-mushroom-hit", type=int, default=1)
@@ -589,6 +524,9 @@ if __name__ == "__main__":
         exploration_final_eps=args.exploration_final_eps,
         net_arch=[int(x) for x in args.net_arch.split(",")],
         eval_freq=args.eval_freq,
+        n_atoms=args.n_atoms,
+        v_min=args.v_min,
+        v_max=args.v_max,
         quiet=args.quiet,
         reward_mushroom_hit=args.reward_mushroom_hit,
         reward_mushroom_destroy=args.reward_mushroom_destroy,

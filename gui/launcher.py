@@ -49,7 +49,7 @@ class Launcher(tk.Tk):
 
     def _build_train_tab(self, parent: ttk.Notebook) -> tk.Frame:
         tab = tk.Frame(parent, padx=12, pady=12)
-        tk.Label(tab, text="DDQN / CNN Hyperparameters", font=("TkDefaultFont", 11, "bold")).pack(pady=(0, 6))
+        tk.Label(tab, text="C51 / CNN Hyperparameters", font=("TkDefaultFont", 11, "bold")).pack(pady=(0, 6))
         tk.Label(tab, text="Hover over any field for a description.",
                  fg="gray", font=("TkDefaultFont", 9)).pack(pady=(0, 8))
 

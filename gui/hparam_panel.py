@@ -18,7 +18,7 @@ SPECS: list[tuple] = [
     ("Seed",                   "seed",                   "0",       "int",   0,    None, "Random seed for reproducibility"),
     ("Eval frequency",         "eval-freq",              "30000",   "int",   1,    None, "Run 10 deterministic eval games every N training steps"),
 
-    ("section", "DDQN / CNN"),
+    ("section", "C51 / CNN"),
     ("Learning rate",          "learning-rate",          "0.0001",  "float", 0,    1,    "Adam optimizer learning rate"),
     ("Buffer size",            "buffer-size",            "100000",  "int",   1,    None, "Replay buffer capacity"),
     ("Learning starts",        "learning-starts",        "10000",   "int",   0,    None, "Steps before first gradient update"),
@@ -31,6 +31,9 @@ SPECS: list[tuple] = [
     ("Exploration fraction",   "exploration-fraction",   "0.1",     "float", 0,    1,    "Fraction of training spent exploring"),
     ("Final epsilon",          "exploration-final-eps",  "0.01",    "float", 0,    1,    "Epsilon at end of exploration schedule"),
     ("Net architecture",       "net-arch",               "256,256", "str",   None, None, "MLP head layer sizes after CNN, comma-separated (e.g. 256,256)"),
+    ("Atoms (C51)",            "n-atoms",                "51",      "int",   3,    501,  "Number of atoms in the return distribution"),
+    ("V-min",                  "v-min",                  "-10000",  "float", None, None, "Minimum return value in the C51 support"),
+    ("V-max",                  "v-max",                  "10000",   "float", None, None, "Maximum return value in the C51 support"),
 
     ("section", "Rewards"),
     ("Mushroom hit",           "reward-mushroom-hit",     "1",      "int",   0,    None, "Reward for hitting a mushroom without destroying it"),
