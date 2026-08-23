@@ -1,10 +1,11 @@
 {
-  "timesteps": "2500000",
+  "timesteps": "10000000",
   "n-envs": "256",
   "seed": "0",
-  "eval-freq": "30000",
+  "eval-freq": "100000",
+  "checkpoint-freq": "250000",
   "learning-rate": "0.0003",
-  "buffer-size": "500000",
+  "buffer-size": "750000",
   "learning-starts": "50000",
   "batch-size": "512",
   "tau": "1.0",
@@ -34,5 +35,5 @@
   "reward-survival": "0",
   "reward-proximity-penalty": "0",
   "proximity-distance-tiles": "3",
-  "watch-model": "models/dqn_centipede_ckpt_1098240_steps"
+  "watch-model": "models/dqn_centipede"
 }

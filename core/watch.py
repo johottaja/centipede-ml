@@ -54,17 +54,6 @@ CHANNEL_META = [
     ("bullet", (255, 255, 110)),
 ]
 
-ACTION_SHORT = {
-    0: "·",
-    1: "←",
-    2: "→",
-    3: "↑",
-    4: "↓",
-    5: "←F",
-    6: "→F",
-    7: "↑F",
-    8: "↓F",
-}
 ACTION_NAMES = {
     0: "NOOP",
     1: "LEFT",
@@ -76,6 +65,43 @@ ACTION_NAMES = {
     7: "UP+F",
     8: "DOWN+F",
 }
+
+# Screen-space unit vector for each action (pygame y grows downward).
+ACTION_DIR = {
+    ACTION_NOOP: (0, 0),
+    ACTION_LEFT: (-1, 0),
+    ACTION_RIGHT: (1, 0),
+    ACTION_UP: (0, -1),
+    ACTION_DOWN: (0, 1),
+    5: (-1, 0),
+    6: (1, 0),
+    7: (0, -1),
+    8: (0, 1),
+}
+
+
+def _draw_arrow(
+    surf: pygame.Surface,
+    cx: float,
+    cy: float,
+    dx: float,
+    dy: float,
+    size: float,
+    color: tuple[int, int, int],
+) -> None:
+    if dx == 0 and dy == 0:
+        pygame.draw.circle(surf, color, (int(cx), int(cy)), max(3, int(size * 0.28)))
+        return
+    px, py = -dy, dx
+    tip = (cx + dx * size, cy + dy * size)
+    left = (cx - dx * size * 0.6 + px * size * 0.52, cy - dy * size * 0.6 + py * size * 0.52)
+    right = (cx - dx * size * 0.6 - px * size * 0.52, cy - dy * size * 0.6 - py * size * 0.52)
+    pygame.draw.polygon(
+        surf,
+        color,
+        [(int(round(x)), int(round(y))) for x, y in (tip, left, right)],
+    )
+
 
 
 def _pick_model_interactive() -> str | None:
@@ -310,20 +336,13 @@ class WatchOverlay:
             8: (1, 2),
         }
 
-        def draw_cell(action: int, col: int, row: int, ox: int) -> None:
+        def draw_cell(action: int, col: int, row: int, ox: int, fire: bool) -> None:
             p = float(self.probs[action]) if action < len(self.probs) else 0.0
             x = ox + col * (cell + gap)
             y = origin_y + int(row * (cell + gap))
             rect = pygame.Rect(x, y, cell, cell)
             chosen = action == self.action
             pygame.draw.rect(window, BAR_BG, rect, border_radius=6)
-            fill_h = int(round((cell - 6) * p))
-            if fill_h > 0:
-                fill = pygame.Rect(x + 3, y + cell - 3 - fill_h, cell - 6, fill_h)
-                base = (70, 140, 255) if action < 5 else (255, 130, 70)
-                if chosen:
-                    base = tuple(min(255, c + 40) for c in base)
-                pygame.draw.rect(window, base, fill, border_radius=4)
             pygame.draw.rect(
                 window,
                 SELECTED_BORDER if chosen else PANEL_LINE,
@@ -331,24 +350,74 @@ class WatchOverlay:
                 width=3 if chosen else 1,
                 border_radius=6,
             )
-            label = font_sm.render(ACTION_SHORT[action], True, TEXT)
-            window.blit(
-                label,
-                (rect.centerx - label.get_width() // 2, rect.centery - label.get_height() // 2),
-            )
+            dx, dy = ACTION_DIR[action]
+            idle = (70, 78, 92)
+            if fire:
+                active = (255, 150, 70)
+            else:
+                active = (90, 170, 255)
+            if chosen:
+                color = SELECTED_BORDER
+                size = cell * 0.38
+            else:
+                t = min(1.0, p * 3.0)
+                color = tuple(int(idle[i] + (active[i] - idle[i]) * t) for i in range(3))
+                size = cell * (0.22 + 0.20 * t)
+            _draw_arrow(window, rect.centerx, rect.centery, dx, dy, size, color)
+            if fire:
+                pygame.draw.circle(
+                    window,
+                    (255, 90, 40) if chosen else (180, 70, 40),
+                    (rect.right - 8, rect.top + 8),
+                    3,
+                )
 
         move_title = font_sm.render("move", True, TEXT_DIM)
         window.blit(move_title, (origin_x, y0 + 22))
         for action, (col, row) in move_layout.items():
-            draw_cell(action, col, row, origin_x)
+            draw_cell(action, col, row, origin_x, fire=False)
 
         fire_x = origin_x + 3 * (cell + gap) + 28
         fire_title = font_sm.render("move + fire", True, TEXT_DIM)
         window.blit(fire_title, (fire_x, y0 + 22))
         for action, (col, row) in fire_layout.items():
-            draw_cell(action, col, row, fire_x)
+            draw_cell(action, col, row, fire_x, fire=True)
 
-        bars_x = fire_x + 3 * (cell + gap) + 24
+        # Net heading: probability-weighted direction the policy prefers.
+        vx = (
+            -float(self.probs[ACTION_LEFT])
+            + float(self.probs[ACTION_RIGHT])
+            - float(self.probs[5])
+            + float(self.probs[6])
+        )
+        vy = (
+            -float(self.probs[ACTION_UP])
+            + float(self.probs[ACTION_DOWN])
+            - float(self.probs[7])
+            + float(self.probs[8])
+        )
+        compass_x = fire_x + 3 * (cell + gap) + 52
+        compass_y = origin_y + cell + gap
+        pygame.draw.circle(window, BAR_BG, (compass_x, compass_y), 34)
+        pygame.draw.circle(window, PANEL_LINE, (compass_x, compass_y), 34, 1)
+        heading = font_sm.render("heading", True, TEXT_DIM)
+        window.blit(heading, (compass_x - heading.get_width() // 2, origin_y - 16))
+        mag = (vx * vx + vy * vy) ** 0.5
+        if mag > 1e-4:
+            ux, uy = vx / mag, vy / mag
+            _draw_arrow(
+                window,
+                compass_x,
+                compass_y,
+                ux,
+                uy,
+                12.0 + 16.0 * min(1.0, mag * 2.0),
+                SELECTED_BORDER if mag > 0.15 else (90, 170, 255),
+            )
+        else:
+            pygame.draw.circle(window, TEXT_DIM, (compass_x, compass_y), 4)
+
+        bars_x = compass_x + 46
         bars_w = WIN_W - bars_x - 16
         bar_h = 8
         bar_gap = 4

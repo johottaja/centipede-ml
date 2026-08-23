@@ -11,7 +11,7 @@ from typing import Any, Optional
 import numpy as np
 import torch as th
 from gymnasium import spaces
-from stable_baselines3.common.buffers import NStepReplayBuffer
+from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.type_aliases import ReplayBufferSamples
 from stable_baselines3.common.vec_env import VecNormalize
 
@@ -61,12 +61,17 @@ class _SegmentTree:
         return i - n
 
 
-class PrioritizedReplayBuffer(NStepReplayBuffer):
-    """Proportional PER on top of SB3's NStepReplayBuffer.
+class PrioritizedReplayBuffer(ReplayBuffer):
+    """Proportional PER with optional n-step returns (Rainbow).
 
     New transitions are inserted at max priority so they are sampled at
     least once. `beta` is annealed externally (typically  β₀ → 1).
-    When `n_steps > 1`, sampled targets are n-step returns (Rainbow).
+
+    With ``optimize_memory_usage=True`` (default), ``next_obs`` is not stored:
+    it is read from ``observations[(t+1) % size]``, the slot SB3 writes during
+    ``add``. That slot is given zero priority so it is never sampled as a
+    transition. SB3 forbids combining this with timeout handling; this env
+    has no time-limit truncations, so timeouts stay unused.
     """
 
     def __init__(
@@ -76,7 +81,8 @@ class PrioritizedReplayBuffer(NStepReplayBuffer):
         action_space: spaces.Space,
         device: th.device | str = "auto",
         n_envs: int = 1,
-        optimize_memory_usage: bool = False,
+        optimize_memory_usage: bool = True,
+        handle_timeout_termination: bool = True,
         alpha: float = 0.6,
         eps: float = 1e-6,
         n_steps: int = 1,
@@ -84,20 +90,19 @@ class PrioritizedReplayBuffer(NStepReplayBuffer):
         **kwargs: Any,
     ) -> None:
         if optimize_memory_usage:
-            raise ValueError(
-                "PrioritizedReplayBuffer does not support optimize_memory_usage=True"
-            )
+            handle_timeout_termination = False
         super().__init__(
             buffer_size,
             observation_space,
             action_space,
             device=device,
             n_envs=n_envs,
-            optimize_memory_usage=False,
-            n_steps=n_steps,
-            gamma=gamma,
+            optimize_memory_usage=optimize_memory_usage,
+            handle_timeout_termination=handle_timeout_termination,
             **kwargs,
         )
+        self.n_steps = n_steps
+        self.gamma = gamma
         self.alpha = alpha
         self.eps = eps
         self.beta = 0.4
@@ -124,6 +129,12 @@ class PrioritizedReplayBuffer(NStepReplayBuffer):
         for env_i in range(self.n_envs):
             self.sum_tree[base + env_i] = priority
             self.min_tree[base + env_i] = priority
+        if self.optimize_memory_usage:
+            # observations[pos] now holds next_obs of the row we just wrote.
+            inv = self.pos * self.n_envs
+            for env_i in range(self.n_envs):
+                self.sum_tree[inv + env_i] = 0.0
+                self.min_tree[inv + env_i] = np.inf
 
     def sample(
         self, batch_size: int, env: Optional[VecNormalize] = None
@@ -145,9 +156,7 @@ class PrioritizedReplayBuffer(NStepReplayBuffer):
 
         last = n - 1
         for i, mass in enumerate(masses):
-            idx = self.sum_tree.find_prefixsum(min(mass, total - 1e-12))
-            if idx > last:
-                idx = last
+            idx = self._valid_tree_index(min(mass, total - 1e-12), last)
             p_i = self.sum_tree[idx]
             tree_indices[i] = idx
             batch_inds[i] = idx // self.n_envs
@@ -157,6 +166,27 @@ class PrioritizedReplayBuffer(NStepReplayBuffer):
         self.tree_indices = tree_indices
         self.importance_weights = self.to_torch(weights)
         return self._get_samples(batch_inds, env=env, env_indices=env_indices)
+
+    def _valid_tree_index(self, mass: float, last: int) -> int:
+        idx = self.sum_tree.find_prefixsum(mass)
+        if idx > last:
+            idx = last
+        if not self.optimize_memory_usage:
+            return idx
+        for _ in range(8):
+            if idx <= last and self.sum_tree[idx] > 0.0 and idx // self.n_envs != self.pos:
+                return idx
+            idx = self.sum_tree.find_prefixsum(
+                np.random.random() * max(self.sum_tree.total() - 1e-12, 0.0)
+            )
+            if idx > last:
+                idx = last
+        return idx
+
+    def _stored_next_obs(self, indices: np.ndarray, env_indices: np.ndarray):
+        if self.optimize_memory_usage:
+            return self.observations[(indices + 1) % self.buffer_size, env_indices]
+        return self.next_observations[indices, env_indices]
 
     def _get_samples(
         self,
@@ -169,7 +199,7 @@ class PrioritizedReplayBuffer(NStepReplayBuffer):
 
         if self.n_steps <= 1:
             next_obs = self._normalize_obs(
-                self.next_observations[batch_inds, env_indices, :], env
+                self._stored_next_obs(batch_inds, env_indices), env
             )
             data = (
                 self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
@@ -224,7 +254,7 @@ class PrioritizedReplayBuffer(NStepReplayBuffer):
 
             last_indices = (batch_inds + done_idx) % self.buffer_size
             next_obs = self._normalize_obs(
-                self.next_observations[last_indices, env_indices], env
+                self._stored_next_obs(last_indices, env_indices), env
             )
             next_dones = self.dones[last_indices, env_indices][:, None].astype(np.float32)
             next_timeouts = self.timeouts[last_indices, env_indices][:, None].astype(

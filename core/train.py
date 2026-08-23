@@ -353,6 +353,7 @@ def train(
     exploration_final_eps: float = 0.01,
     net_arch: list[int] | None = None,
     eval_freq: int = 30_000,
+    checkpoint_freq: int = 100_000,
     n_atoms: int = 51,
     v_min: float = -10_000.0,
     v_max: float = 10_000.0,
@@ -410,9 +411,9 @@ def train(
 
     env = make_vec_env(n_envs=n_envs, seed=seed, **env_kwargs)
 
-    # save_freq is per vec-env step; divide by n_envs to hit every 100k timesteps
+    # save_freq is per vec-env step; divide by n_envs to hit every checkpoint_freq timesteps
     checkpoint_cb = LoggingCheckpointCallback(
-        save_freq=max(100_000 // n_envs, 1),
+        save_freq=max(checkpoint_freq // n_envs, 1),
         save_path=MODEL_DIR,
         name_prefix="dqn_centipede_ckpt",
         verbose=0,
@@ -463,7 +464,7 @@ def train(
         f"{n_atoms} atoms [{v_min:,.0f}, {v_max:,.0f}] | "
         f"n-step={n_steps} | "
         f"{'PER α=' + str(per_alpha) + ' β=' + str(per_beta) if prioritized_replay else 'uniform replay'} | "
-        f"eval every {eval_freq:,} steps | seed {seed}"
+        f"eval every {eval_freq:,} steps | checkpoint every {checkpoint_freq:,} steps | seed {seed}"
     )
     t0 = time.monotonic()
     model.learn(
@@ -514,6 +515,8 @@ if __name__ == "__main__":
                         help="Comma-separated MLP head layer sizes after CNN, e.g. 256,256")
     parser.add_argument("--eval-freq", type=int,
                         help="Run eval games every N training steps (default: 30000)")
+    parser.add_argument("--checkpoint-freq", type=int,
+                        help="Save a model checkpoint every N training steps (default: 100000)")
     parser.add_argument("--n-atoms", type=int,
                         help="Number of atoms for C51 return distribution (default: 51)")
     parser.add_argument("--v-min", type=float,
@@ -563,6 +566,7 @@ if __name__ == "__main__":
         exploration_final_eps=args.exploration_final_eps,
         net_arch=[int(x) for x in args.net_arch.split(",")],
         eval_freq=args.eval_freq,
+        checkpoint_freq=args.checkpoint_freq,
         n_atoms=args.n_atoms,
         v_min=args.v_min,
         v_max=args.v_max,

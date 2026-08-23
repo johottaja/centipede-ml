@@ -17,6 +17,7 @@ SPECS: list[tuple] = [
     ("Parallel envs",          "n-envs",                 "4",       "int",   1,    None, "Number of parallel environments (SubprocVecEnv); more envs = faster experience collection"),
     ("Seed",                   "seed",                   "0",       "int",   0,    None, "Random seed for reproducibility"),
     ("Eval frequency",         "eval-freq",              "30000",   "int",   1,    None, "Run 10 deterministic eval games every N training steps"),
+    ("Checkpoint frequency",   "checkpoint-freq",        "100000",  "int",   1,    None, "Save a model checkpoint every N training steps"),
 
     ("section", "C51 / CNN"),
     ("Learning rate",          "learning-rate",          "0.0001",  "float", 0,    1,    "Adam optimizer learning rate"),

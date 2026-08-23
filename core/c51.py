@@ -157,6 +157,7 @@ class C51(DQN):
         self.prioritized_replay_beta = prioritized_replay_beta
         if prioritized_replay:
             kwargs.setdefault("replay_buffer_class", PrioritizedReplayBuffer)
+            kwargs.setdefault("optimize_memory_usage", True)
             if kwargs["replay_buffer_class"] is PrioritizedReplayBuffer:
                 rb_kwargs = dict(kwargs.get("replay_buffer_kwargs") or {})
                 rb_kwargs.setdefault("alpha", prioritized_replay_alpha)
