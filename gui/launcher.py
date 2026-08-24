@@ -176,8 +176,12 @@ class Launcher(tk.Tk):
         self._hparam_panel.save()
         cmd = [sys.executable, "-m", "core.train"] + extra_args
         eval_freq = int(self._hparam_panel._vars["eval-freq"].get())
+        n_eval_episodes = int(self._hparam_panel._vars["n-eval-episodes"].get())
         self._train_btn.config(text="Training… (running)", state="disabled")
-        self._progress_win = ProgressWindow(self, cmd, on_done=self._on_train_done, eval_freq=eval_freq)
+        self._progress_win = ProgressWindow(
+            self, cmd, on_done=self._on_train_done,
+            eval_freq=eval_freq, n_eval_episodes=n_eval_episodes,
+        )
 
     def _on_train_done(self) -> None:
         self._train_btn.config(text="Start Training", state="normal")

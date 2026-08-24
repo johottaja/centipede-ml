@@ -21,6 +21,7 @@ from core.env import CentipedeEnv
 from core.c51 import C51
 from core.game import (
     ACTION_DOWN,
+    ACTION_FIRE,
     ACTION_LEFT,
     ACTION_NOOP,
     ACTION_RIGHT,
@@ -31,6 +32,7 @@ from core.game import (
     WIDTH,
     GameEngine,
 )
+from core.hparams import env_reward_kwargs
 from core.train import MODEL_PATH, FRAME_SKIP, list_saved_models
 
 SIDEBAR_W = 168
@@ -64,6 +66,7 @@ ACTION_NAMES = {
     6: "RIGHT+F",
     7: "UP+F",
     8: "DOWN+F",
+    9: "FIRE",
 }
 
 # Screen-space unit vector for each action (pygame y grows downward).
@@ -77,6 +80,7 @@ ACTION_DIR = {
     6: (1, 0),
     7: (0, -1),
     8: (0, 1),
+    ACTION_FIRE: (0, 0),
 }
 
 
@@ -130,7 +134,9 @@ def _predict_action(model: C51, obs: np.ndarray) -> tuple[int, np.ndarray]:
         q = model.q_net(obs_t).flatten()
         q_np = q.detach().cpu().numpy()
         span = float(q_np.max() - q_np.min())
-        temperature = max(span / 4.0, 1.0)
+        # No high temperature floor — scaled RL rewards compress Q-values and the
+        # old max(span/4, 1.0) rule flattened the Boltzmann map.
+        temperature = max(span / 4.0, 1e-6)
         probs = F.softmax(q / temperature, dim=0).detach().cpu().numpy()
         action = int(q.argmax().item())
     return action, probs
@@ -332,6 +338,7 @@ class WatchOverlay:
         fire_layout = {
             7: (1, 0),
             5: (0, 1),
+            ACTION_FIRE: (1, 1),
             6: (2, 1),
             8: (1, 2),
         }
@@ -456,6 +463,7 @@ def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> Non
         render_mode="human",
         frame_skip=FRAME_SKIP,
         window_size=(WIN_W, WIN_H),
+        **env_reward_kwargs(),
     )
     overlay = WatchOverlay(env, n_stack=FRAME_SKIP)
     env.present_fn = overlay.present
@@ -483,7 +491,7 @@ def watch(model_path: str = MODEL_PATH, episodes: int = 5, fps: int = 60) -> Non
             total_reward += reward
             done = terminated or truncated
 
-        print(f"Episode {ep + 1}: score={info['score']}  total_reward={total_reward:.0f}")
+        print(f"Episode {ep + 1}: score={info['arcade_score']}  total_reward={total_reward:.2f}")
 
     env.close()
 

@@ -5,9 +5,10 @@ translates keyboard input into discrete actions each frame.
 import sys
 import pygame
 from core.env import CentipedeEnv
+from core.hparams import env_reward_kwargs
 from core.game import (
     ACTION_NOOP, ACTION_LEFT, ACTION_RIGHT, ACTION_UP, ACTION_DOWN,
-    NUM_MOVES,
+    ACTION_FIRE, NUM_MOVES,
 )
 
 
@@ -30,11 +31,13 @@ def keys_to_action(keys) -> int:
         move = ACTION_NOOP
     if fire and move != ACTION_NOOP:
         return NUM_MOVES + (move - 1)
+    if fire:
+        return ACTION_FIRE
     return move
 
 
 def main():
-    env = CentipedeEnv(render_mode="human", frame_skip=1)
+    env = CentipedeEnv(render_mode="human", frame_skip=1, **env_reward_kwargs())
     env.reset()
 
     while True:

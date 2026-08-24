@@ -5,7 +5,7 @@ Observation : uint8 occupancy grid, shape (ROWS, COLS, OCCUPANCY_CHANNELS * fram
               Each frame contributes 6 channels (player, mushrooms, heads, body,
               spiders, bullet) with values 0–255 encoding fractional tile occupancy.
               Default frame_skip=4 stacks 4 consecutive frames → shape (31, 30, 24).
-Action space: Discrete(9) – 5 moves + 4 move-and-fire (no standing fire)
+Action space: Discrete(10) – 5 moves + 4 move-and-fire + stand-and-fire
 Reward       : score delta per agent step (summed across repeated frames)
 Terminated   : player loses all lives
 """
@@ -35,15 +35,15 @@ class CentipedeEnv(gym.Env):
         self,
         render_mode: str | None = None,
         frame_skip: int = 4,
-        reward_mushroom_hit: int = 1,
-        reward_mushroom_destroy: int = 5,
-        reward_body_hit: int = 10,
-        reward_head_hit: int = 100,
+        reward_mushroom_hit: float = 1,
+        reward_mushroom_destroy: float = 5,
+        reward_body_hit: float = 10,
+        reward_head_hit: float = 100,
         reward_depth_discount: float = 0.0,
         reward_depth_discount_fn: str = "linear",
-        reward_spider_hit: int = 300,
-        reward_spider_penalty: int = 1000,
-        reward_centipede_penalty: int = 1000,
+        reward_spider_hit: float = 300,
+        reward_spider_penalty: float = 1000,
+        reward_centipede_penalty: float = 1000,
         reward_survival: float = 0.01,
         reward_proximity_penalty: float = 1.0,
         proximity_distance_tiles: int = 3,
@@ -83,9 +83,9 @@ class CentipedeEnv(gym.Env):
             reward_proximity_penalty=reward_proximity_penalty,
             proximity_distance_tiles=proximity_distance_tiles,
         )
-        self._frame_buf = np.zeros(
-            (GameEngine.OCCUPANCY_CHANNELS, ROWS, COLS), dtype=np.float32
-        )
+        if render_mode == "human":
+            self._engine.show_arcade_score = True
+        self._n_ch = GameEngine.OCCUPANCY_CHANNELS
         self._obs_buf = np.zeros((ROWS, COLS, n_channels), dtype=np.uint8)
         self._surf: pygame.Surface | None = None
         self._window: pygame.Surface | None = None
@@ -119,12 +119,11 @@ class CentipedeEnv(gym.Env):
         self._engine.reset(seed=seed)
         if self.render_mode is not None:
             self._init_pygame()
-        self._engine.get_occupancy_obs(out=self._frame_buf)
-        frame_u8 = (self._frame_buf * 255.0).astype(np.uint8)
-        for i in range(self.frame_skip):
-            ch0 = i * GameEngine.OCCUPANCY_CHANNELS
-            ch1 = ch0 + GameEngine.OCCUPANCY_CHANNELS
-            self._obs_buf[:, :, ch0:ch1] = np.transpose(frame_u8, (1, 2, 0))
+        n = self._n_ch
+        self._engine.get_occupancy_obs(out=self._obs_buf[:, :, :n])
+        src = self._obs_buf[:, :, :n]
+        for i in range(1, self.frame_skip):
+            self._obs_buf[:, :, i * n : (i + 1) * n] = src
         return self._obs_buf.copy(), {}
 
     # ------------------------------------------------------------------
@@ -133,14 +132,12 @@ class CentipedeEnv(gym.Env):
         terminated = False
         truncated = False
 
+        n = self._n_ch
         for i in range(self.frame_skip):
             reward, terminated, truncated = self._engine.step(int(action))
             total_reward += reward
-            self._engine.get_occupancy_obs(out=self._frame_buf)
-            ch0 = i * GameEngine.OCCUPANCY_CHANNELS
-            ch1 = ch0 + GameEngine.OCCUPANCY_CHANNELS
-            self._obs_buf[:, :, ch0:ch1] = np.transpose(
-                (self._frame_buf * 255.0).astype(np.uint8), (1, 2, 0)
+            self._engine.get_occupancy_obs(
+                out=self._obs_buf[:, :, i * n : (i + 1) * n]
             )
             if self.render_mode == "human":
                 self.render()
@@ -149,6 +146,7 @@ class CentipedeEnv(gym.Env):
 
         info = {
             "score": self._engine.score,
+            "arcade_score": self._engine.arcade_score,
             "lives": self._engine.player.lives,
             "segments_destroyed": self._engine.segments_destroyed,
             "spiders_destroyed": self._engine.spiders_destroyed,

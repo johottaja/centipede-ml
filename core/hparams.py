@@ -16,7 +16,8 @@ SPECS: list[tuple] = [
     ("Timesteps",              "timesteps",              "100000", "int",   1,    None, "Total environment steps to train for"),
     ("Parallel envs",          "n-envs",                 "4",       "int",   1,    None, "Number of parallel environments (SubprocVecEnv); more envs = faster experience collection"),
     ("Seed",                   "seed",                   "0",       "int",   0,    None, "Random seed for reproducibility"),
-    ("Eval frequency",         "eval-freq",              "30000",   "int",   1,    None, "Run 10 deterministic eval games every N training steps"),
+    ("Eval frequency",         "eval-freq",              "30000",   "int",   1,    None, "Run deterministic eval games every N training steps"),
+    ("Eval games",             "n-eval-episodes",        "10",      "int",   1,    None, "Number of deterministic eval games per evaluation"),
     ("Checkpoint frequency",   "checkpoint-freq",        "100000",  "int",   1,    None, "Save a model checkpoint every N training steps"),
 
     ("section", "C51 / CNN"),
@@ -41,15 +42,15 @@ SPECS: list[tuple] = [
     ("PER beta",               "per-beta",               "0.4",     "float", 0,    1,    "Importance-sampling exponent at the start of training (annealed to 1)"),
 
     ("section", "Rewards"),
-    ("Mushroom hit",           "reward-mushroom-hit",     "1",      "int",   0,    None, "Reward for hitting a mushroom without destroying it"),
-    ("Mushroom destroy",       "reward-mushroom-destroy", "5",      "int",   0,    None, "Reward for fully destroying a mushroom"),
-    ("Body segment hit",       "reward-body-hit",         "10",     "int",   0,    None, "Reward for hitting a centipede body segment"),
-    ("Head hit",               "reward-head-hit",         "100",    "int",   0,    None, "Reward for hitting the centipede head"),
+    ("Mushroom hit",           "reward-mushroom-hit",     "1",      "float", 0,    None, "Reward for hitting a mushroom without destroying it"),
+    ("Mushroom destroy",       "reward-mushroom-destroy", "5",      "float", 0,    None, "Reward for fully destroying a mushroom"),
+    ("Body segment hit",       "reward-body-hit",         "10",     "float", 0,    None, "Reward for hitting a centipede body segment"),
+    ("Head hit",               "reward-head-hit",         "100",    "float", 0,    None, "Reward for hitting the centipede head"),
     ("Depth discount",         "reward-depth-discount",   "0.0",    "float", 0,    1,    "Fraction by which hit rewards are reduced at the bottom row (0 = disabled, 1 = zero reward at bottom)"),
     ("Depth discount fn",      "reward-depth-discount-fn","linear", "choice", ["linear", "exponential"], None, "Shape of the depth discount curve"),
-    ("Spider hit",             "reward-spider-hit",        "300",    "int",   0,    None, "Reward for shooting a spider"),
-    ("Spider collision penalty","reward-spider-penalty",   "1000",   "int",   0,    None, "Penalty (subtracted) when a spider touches the player"),
-    ("Centipede collision penalty","reward-centipede-penalty","1000","int",   0,    None, "Penalty (subtracted) when a centipede segment touches the player"),
+    ("Spider hit",             "reward-spider-hit",        "300",    "float", 0,    None, "Reward for shooting a spider"),
+    ("Spider collision penalty","reward-spider-penalty",   "1000",   "float", 0,    None, "Penalty (subtracted) when a spider touches the player"),
+    ("Centipede collision penalty","reward-centipede-penalty","1000","float", 0,    None, "Penalty (subtracted) when a centipede segment touches the player"),
     ("Survival bonus",           "reward-survival",          "0.01",   "float", 0,    None, "Reward added every step the player stays alive"),
     ("Proximity penalty",        "reward-proximity-penalty", "1.0",    "float", 0,    None, "Max penalty per step when a threat is within proximity range (scales linearly with distance)"),
     ("Proximity range (tiles)",  "proximity-distance-tiles", "3",      "int",   1,    None, "Distance in tiles within which proximity penalty applies"),
@@ -57,6 +58,22 @@ SPECS: list[tuple] = [
 
 FIELD_SPECS = [s for s in SPECS if s[0] != "section"]
 SETTINGS_KEYS = {key for _, key, *_ in FIELD_SPECS}
+
+# CentipedeEnv / GameEngine kwargs derived from the Rewards section.
+ENV_REWARD_KEYS = (
+    "reward_mushroom_hit",
+    "reward_mushroom_destroy",
+    "reward_body_hit",
+    "reward_head_hit",
+    "reward_depth_discount",
+    "reward_depth_discount_fn",
+    "reward_spider_hit",
+    "reward_spider_penalty",
+    "reward_centipede_penalty",
+    "reward_survival",
+    "reward_proximity_penalty",
+    "proximity_distance_tiles",
+)
 
 
 def _coerce_value(raw: str, typ: str) -> Any:
@@ -89,3 +106,9 @@ def load_settings_defaults(path: str = SETTINGS_PATH) -> dict[str, Any]:
         dest = key.replace("-", "_")
         defaults[dest] = _coerce_value(raw, typ)
     return defaults
+
+
+def env_reward_kwargs(path: str = SETTINGS_PATH) -> dict[str, Any]:
+    """Reward-related kwargs for CentipedeEnv, from settings.json."""
+    defaults = load_settings_defaults(path)
+    return {k: defaults[k] for k in ENV_REWARD_KEYS}

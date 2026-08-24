@@ -70,15 +70,15 @@ def list_saved_models() -> list[tuple[str, str]]:
 def _make_env_fn(
     seed: int = 0,
     frame_skip: int = FRAME_SKIP,
-    reward_mushroom_hit: int = 1,
-    reward_mushroom_destroy: int = 5,
-    reward_body_hit: int = 10,
-    reward_head_hit: int = 100,
+    reward_mushroom_hit: float = 1,
+    reward_mushroom_destroy: float = 5,
+    reward_body_hit: float = 10,
+    reward_head_hit: float = 100,
     reward_depth_discount: float = 0.0,
     reward_depth_discount_fn: str = "linear",
-    reward_spider_hit: int = 300,
-    reward_spider_penalty: int = 1000,
-    reward_centipede_penalty: int = 1000,
+    reward_spider_hit: float = 300,
+    reward_spider_penalty: float = 1000,
+    reward_centipede_penalty: float = 1000,
     reward_survival: float = 0.01,
     reward_proximity_penalty: float = 1.0,
     proximity_distance_tiles: int = 3,
@@ -111,15 +111,15 @@ def make_vec_env(
     n_envs: int = 1,
     seed: int = 0,
     frame_skip: int = FRAME_SKIP,
-    reward_mushroom_hit: int = 1,
-    reward_mushroom_destroy: int = 5,
-    reward_body_hit: int = 10,
-    reward_head_hit: int = 100,
+    reward_mushroom_hit: float = 1,
+    reward_mushroom_destroy: float = 5,
+    reward_body_hit: float = 10,
+    reward_head_hit: float = 100,
     reward_depth_discount: float = 0.0,
     reward_depth_discount_fn: str = "linear",
-    reward_spider_hit: int = 300,
-    reward_spider_penalty: int = 1000,
-    reward_centipede_penalty: int = 1000,
+    reward_spider_hit: float = 300,
+    reward_spider_penalty: float = 1000,
+    reward_centipede_penalty: float = 1000,
     reward_survival: float = 0.01,
     reward_proximity_penalty: float = 1.0,
     proximity_distance_tiles: int = 3,
@@ -353,6 +353,7 @@ def train(
     exploration_final_eps: float = 0.01,
     net_arch: list[int] | None = None,
     eval_freq: int = 30_000,
+    n_eval_episodes: int = 10,
     checkpoint_freq: int = 100_000,
     n_atoms: int = 51,
     v_min: float = -10_000.0,
@@ -360,15 +361,15 @@ def train(
     prioritized_replay: bool = True,
     per_alpha: float = 0.6,
     per_beta: float = 0.4,
-    reward_mushroom_hit: int = 1,
-    reward_mushroom_destroy: int = 5,
-    reward_body_hit: int = 10,
-    reward_head_hit: int = 100,
+    reward_mushroom_hit: float = 1,
+    reward_mushroom_destroy: float = 5,
+    reward_body_hit: float = 10,
+    reward_head_hit: float = 100,
     reward_depth_discount: float = 0.0,
     reward_depth_discount_fn: str = "linear",
-    reward_spider_hit: int = 300,
-    reward_spider_penalty: int = 1000,
-    reward_centipede_penalty: int = 1000,
+    reward_spider_hit: float = 300,
+    reward_spider_penalty: float = 1000,
+    reward_centipede_penalty: float = 1000,
     reward_survival: float = 0.01,
     reward_proximity_penalty: float = 1.0,
     proximity_distance_tiles: int = 3,
@@ -421,7 +422,7 @@ def train(
     progress_cb = ProgressCallback(total_timesteps)
     eval_cb = EvalProgressCallback(
         eval_freq=eval_freq,
-        n_eval_episodes=10,
+        n_eval_episodes=n_eval_episodes,
         env_kwargs=env_kwargs,
         seed=seed,
     )
@@ -464,7 +465,8 @@ def train(
         f"{n_atoms} atoms [{v_min:,.0f}, {v_max:,.0f}] | "
         f"n-step={n_steps} | "
         f"{'PER α=' + str(per_alpha) + ' β=' + str(per_beta) if prioritized_replay else 'uniform replay'} | "
-        f"eval every {eval_freq:,} steps | checkpoint every {checkpoint_freq:,} steps | seed {seed}"
+        f"eval {n_eval_episodes} games every {eval_freq:,} steps | "
+        f"checkpoint every {checkpoint_freq:,} steps | seed {seed}"
     )
     t0 = time.monotonic()
     model.learn(
@@ -515,6 +517,8 @@ if __name__ == "__main__":
                         help="Comma-separated MLP head layer sizes after CNN, e.g. 256,256")
     parser.add_argument("--eval-freq", type=int,
                         help="Run eval games every N training steps (default: 30000)")
+    parser.add_argument("--n-eval-episodes", type=int,
+                        help="Number of deterministic eval games per evaluation (default: 10)")
     parser.add_argument("--checkpoint-freq", type=int,
                         help="Save a model checkpoint every N training steps (default: 100000)")
     parser.add_argument("--n-atoms", type=int,
@@ -531,16 +535,16 @@ if __name__ == "__main__":
                         help="PER importance-sampling exponent at start of training (annealed to 1)")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress human-readable logs on stderr (JSON stdout only)")
-    parser.add_argument("--reward-mushroom-hit", type=int)
-    parser.add_argument("--reward-mushroom-destroy", type=int)
-    parser.add_argument("--reward-body-hit", type=int)
-    parser.add_argument("--reward-head-hit", type=int)
+    parser.add_argument("--reward-mushroom-hit", type=float)
+    parser.add_argument("--reward-mushroom-destroy", type=float)
+    parser.add_argument("--reward-body-hit", type=float)
+    parser.add_argument("--reward-head-hit", type=float)
     parser.add_argument("--reward-depth-discount", type=float)
     parser.add_argument("--reward-depth-discount-fn", type=str,
                         choices=["linear", "exponential"])
-    parser.add_argument("--reward-spider-hit", type=int)
-    parser.add_argument("--reward-spider-penalty", type=int)
-    parser.add_argument("--reward-centipede-penalty", type=int)
+    parser.add_argument("--reward-spider-hit", type=float)
+    parser.add_argument("--reward-spider-penalty", type=float)
+    parser.add_argument("--reward-centipede-penalty", type=float)
     parser.add_argument("--reward-survival", type=float)
     parser.add_argument("--reward-proximity-penalty", type=float)
     parser.add_argument("--proximity-distance-tiles", type=int)
@@ -566,6 +570,7 @@ if __name__ == "__main__":
         exploration_final_eps=args.exploration_final_eps,
         net_arch=[int(x) for x in args.net_arch.split(",")],
         eval_freq=args.eval_freq,
+        n_eval_episodes=args.n_eval_episodes,
         checkpoint_freq=args.checkpoint_freq,
         n_atoms=args.n_atoms,
         v_min=args.v_min,
