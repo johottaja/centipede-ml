@@ -2,7 +2,7 @@
 Train a C51 (Categorical DQN) agent on Centipede using Stable-Baselines3.
 
 Observation: uint8 occupancy grid (31, 30, 24) — 4 stacked frames × 6 channels.
-Policy: C51Policy with custom GridCNN feature extractor + distributional MLP head.
+Policy: C51Policy with custom GridCNN feature extractor + dueling distributional MLP head.
 The trained model is saved to models/dqn_centipede.zip.
 
 Progress is emitted to stdout as newline-delimited JSON (for the GUI progress window).
@@ -358,6 +358,7 @@ def train(
     n_atoms: int = 51,
     v_min: float = -10_000.0,
     v_max: float = 10_000.0,
+    dueling: bool = True,
     prioritized_replay: bool = True,
     per_alpha: float = 0.6,
     per_beta: float = 0.4,
@@ -380,6 +381,8 @@ def train(
 
     if net_arch is None:
         net_arch = [256, 256]
+    if isinstance(dueling, str):
+        dueling = dueling.lower() in ("1", "true", "yes")
     if isinstance(prioritized_replay, str):
         prioritized_replay = prioritized_replay.lower() in ("1", "true", "yes")
 
@@ -450,6 +453,7 @@ def train(
             "n_atoms": n_atoms,
             "v_min": v_min,
             "v_max": v_max,
+            "dueling": dueling,
         },
         prioritized_replay=prioritized_replay,
         prioritized_replay_alpha=per_alpha,
@@ -463,6 +467,7 @@ def train(
     _log(
         f"training (C51) | {total_timesteps:,} steps | {n_envs} envs | "
         f"{n_atoms} atoms [{v_min:,.0f}, {v_max:,.0f}] | "
+        f"{'dueling' if dueling else 'single-stream'} | "
         f"n-step={n_steps} | "
         f"{'PER α=' + str(per_alpha) + ' β=' + str(per_beta) if prioritized_replay else 'uniform replay'} | "
         f"eval {n_eval_episodes} games every {eval_freq:,} steps | "
@@ -527,6 +532,8 @@ if __name__ == "__main__":
                         help="Minimum support value for C51 atoms")
     parser.add_argument("--v-max", type=float,
                         help="Maximum support value for C51 atoms")
+    parser.add_argument("--dueling", type=str, choices=["true", "false"],
+                        help="Use dueling value/advantage streams (Wang et al. 2016)")
     parser.add_argument("--prioritized-replay", type=str, choices=["true", "false"],
                         help="Use prioritized experience replay (Schaul et al. 2015)")
     parser.add_argument("--per-alpha", type=float,
@@ -575,6 +582,7 @@ if __name__ == "__main__":
         n_atoms=args.n_atoms,
         v_min=args.v_min,
         v_max=args.v_max,
+        dueling=args.dueling,
         prioritized_replay=args.prioritized_replay,
         per_alpha=args.per_alpha,
         per_beta=args.per_beta,

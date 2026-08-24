@@ -34,6 +34,7 @@ SPECS: list[tuple] = [
     ("Exploration fraction",   "exploration-fraction",   "0.1",     "float", 0,    1,    "Fraction of training spent exploring"),
     ("Final epsilon",          "exploration-final-eps",  "0.01",    "float", 0,    1,    "Epsilon at end of exploration schedule"),
     ("Net architecture",       "net-arch",               "256,256", "str",   None, None, "MLP head layer sizes after CNN, comma-separated (e.g. 256,256)"),
+    ("Dueling",                "dueling",                "true",    "choice", ["true", "false"], None, "Split the Q-head into a state-value stream and an action-advantage stream (Wang et al. 2016)"),
     ("Atoms (C51)",            "n-atoms",                "51",      "int",   3,    501,  "Number of atoms in the return distribution"),
     ("V-min",                  "v-min",                  "-10000",  "float", None, None, "Minimum return value in the C51 support"),
     ("V-max",                  "v-max",                  "10000",   "float", None, None, "Maximum return value in the C51 support"),

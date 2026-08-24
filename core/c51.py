@@ -67,7 +67,12 @@ def project_distribution(
 
 
 class C51QNetwork(BaseModel):
-    """Q-network that outputs a categorical distribution per action."""
+    """Q-network that outputs a categorical distribution per action.
+
+    With ``dueling=True`` (Wang et al. 2016 / Rainbow), atom logits are
+    ``V(s) + A(s, a) − mean_a A(s, a)`` so the shared CNN learns a state
+    value while the advantage stream only has to rank actions.
+    """
 
     def __init__(
         self,
@@ -79,6 +84,7 @@ class C51QNetwork(BaseModel):
         n_atoms: int = 51,
         v_min: float = -10_000.0,
         v_max: float = 10_000.0,
+        dueling: bool = False,
         activation_fn: type[nn.Module] = nn.ReLU,
         normalize_images: bool = True,
     ) -> None:
@@ -91,16 +97,29 @@ class C51QNetwork(BaseModel):
         if net_arch is None:
             net_arch = [64, 64]
         self.n_atoms = n_atoms
+        self.dueling = dueling
         self.register_buffer("support", th.linspace(v_min, v_max, n_atoms))
         action_dim = int(self.action_space.n)
-        mlp = create_mlp(features_dim, action_dim * n_atoms, net_arch, activation_fn)
-        self.logits_net = nn.Sequential(*mlp)
+        if dueling:
+            self.value_net = nn.Sequential(
+                *create_mlp(features_dim, n_atoms, net_arch, activation_fn)
+            )
+            self.advantage_net = nn.Sequential(
+                *create_mlp(features_dim, action_dim * n_atoms, net_arch, activation_fn)
+            )
+        else:
+            mlp = create_mlp(features_dim, action_dim * n_atoms, net_arch, activation_fn)
+            self.logits_net = nn.Sequential(*mlp)
 
     def _logits(self, obs: PyTorchObs) -> th.Tensor:
         features = self.extract_features(obs, self.features_extractor)
         batch = features.shape[0]
         action_dim = int(self.action_space.n)
-        return self.logits_net(features).view(batch, action_dim, self.n_atoms)
+        if not self.dueling:
+            return self.logits_net(features).view(batch, action_dim, self.n_atoms)
+        value = self.value_net(features).view(batch, 1, self.n_atoms)
+        advantage = self.advantage_net(features).view(batch, action_dim, self.n_atoms)
+        return value + advantage - advantage.mean(dim=1, keepdim=True)
 
     def dist(self, obs: PyTorchObs) -> th.Tensor:
         return F.softmax(self._logits(obs), dim=-1)
@@ -122,11 +141,13 @@ class C51Policy(DQNPolicy):
         n_atoms: int = 51,
         v_min: float = -10_000.0,
         v_max: float = 10_000.0,
+        dueling: bool = False,
         **kwargs: Any,
     ):
         self.n_atoms = n_atoms
         self.v_min = v_min
         self.v_max = v_max
+        self.dueling = dueling
         super().__init__(*args, **kwargs)
 
     def make_q_net(self) -> C51QNetwork:
@@ -136,6 +157,7 @@ class C51Policy(DQNPolicy):
             n_atoms=self.n_atoms,
             v_min=self.v_min,
             v_max=self.v_max,
+            dueling=self.dueling,
         ).to(self.device)
 
 

@@ -9,15 +9,16 @@
   "buffer-size": "750000",
   "learning-starts": "50000",
   "batch-size": "1024",
-  "tau": "0.075",
-  "gamma": "0.99",
-  "n-steps": "4",
+  "tau": "0.025",
+  "gamma": "0.995",
+  "n-steps": "5",
   "train-freq": "3",
   "gradient-steps": "4",
   "target-update-interval": "1000",
   "exploration-fraction": "0.2",
   "exploration-final-eps": "0.005",
-  "net-arch": "256",
+  "net-arch": "256,256",
+  "dueling": "true",
   "n-atoms": "51",
   "v-min": "-3",
   "v-max": "45",
@@ -36,5 +37,5 @@
   "reward-survival": "0",
   "reward-proximity-penalty": "0",
   "proximity-distance-tiles": "3",
-  "watch-model": "models/dqn_centipede_ckpt_3747840_steps"
+  "watch-model": "models/dqn_centipede_ckpt_4247552_steps"
 }
