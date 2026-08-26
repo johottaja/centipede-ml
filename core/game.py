@@ -28,6 +28,9 @@ COLOR_HUD = (255, 255, 255)
 MUSHROOM_HP = 4
 CENTIPEDE_LENGTH = 12
 CENTIPEDE_SPEED = 2
+# A segment may briefly sit one tile beyond an edge while it turns.  Anything
+# farther than this is unrecoverable and must not keep a wave alive off-screen.
+CENTIPEDE_ESCAPE_MARGIN = 5 * TILE
 PLAYER_SPEED = 4
 BULLET_SPEED = 8
 SHOOT_COOLDOWN = 8
@@ -185,6 +188,7 @@ class Centipede:
             if seg.dropping > 0:
                 dy = min(seg.speed, seg.dropping)
                 seg.y += seg.vdir * dy
+                seg.y = max(0.0, min(float(HEIGHT - TILE), seg.y))
                 seg.dropping -= dy
                 if seg.dropping == 0:
                     row = max(0, min(ROWS - 1, seg.row))
@@ -201,7 +205,10 @@ class Centipede:
             hit_mush = not hit_wall and field.get(next_col, seg.row) is not None
 
             if hit_wall or hit_mush:
-                seg.x = seg.col * TILE
+                # Clamp to the playable edge.  Using seg.col here is unsafe
+                # after a leftward overshoot: floor division turns x=-2 into
+                # column -1, then repeatedly snaps a segment farther left.
+                seg.x = max(0, min(WIDTH - TILE, seg.x))
                 # Don't drop off the board — that used to trap segments in an
                 # off-screen bounce, so no new wave could spawn.
                 next_row = seg.row + seg.vdir
@@ -485,6 +492,34 @@ class GameEngine:
         self.player.x = self._rng.randint(0, COLS - 1) * TILE
         self.player.y = (ROWS - 2) * TILE
 
+    def _remove_escaped_centipedes(self) -> None:
+        """Discard segments that have escaped far beyond the playable board.
+
+        Normal edge turns can temporarily place a segment just outside the
+        board.  A segment more than five tiles away cannot return under the
+        normal movement rules; leaving it alive would prevent the empty-wave
+        check from spawning another centipede.
+        """
+        min_x = -CENTIPEDE_ESCAPE_MARGIN
+        max_x = WIDTH + CENTIPEDE_ESCAPE_MARGIN
+        min_y = -CENTIPEDE_ESCAPE_MARGIN
+        max_y = HEIGHT + CENTIPEDE_ESCAPE_MARGIN
+
+        survivors: list[Centipede] = []
+        for chain in self.centipedes:
+            chain.segments = [
+                seg
+                for seg in chain.segments
+                if min_x <= seg.x <= max_x and min_y <= seg.y <= max_y
+            ]
+            if chain.segments:
+                # If the escaped segment was the head, keep the remaining
+                # chain valid for rendering, rewards, and future splits.
+                for i, seg in enumerate(chain.segments):
+                    seg.is_head = i == 0
+                survivors.append(chain)
+        self.centipedes = survivors
+
     # ------------------------------------------------------------------
     def step(self, action: int) -> tuple[float, bool, bool]:
         """
@@ -514,6 +549,7 @@ class GameEngine:
 
         for c in self.centipedes:
             c.update(self.field)
+        self._remove_escaped_centipedes()
 
         self._spider_mgr.update(self.field, self._rng)
 
@@ -525,7 +561,7 @@ class GameEngine:
         reward += self._proximity_penalty()
         reward += self.reward_survival
 
-        if not self.centipedes:
+        if not any(chain.segments for chain in self.centipedes):
             self._spawn_centipede()
 
         self.score += reward

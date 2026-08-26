@@ -180,14 +180,14 @@ def _log_eval(steps: int, episodes: list[dict]) -> None:
     mean_spiders = sum(spiders) / len(spiders)
     _log(
         f"eval @ {steps:,} steps | "
-        f"mean score {mean_score:,.1f} | "
+        f"mean score {mean_score:,.0f} | "
         f"avg segments {mean_segs:.1f} | "
         f"avg spiders {mean_spiders:.1f} | "
-        f"min/max score {min(scores):,.1f}/{max(scores):,.1f}"
+        f"min/max score {min(scores):,.0f}/{max(scores):,.0f}"
     )
     for i, ep in enumerate(episodes, 1):
         _log(
-            f"  game {i:2d}: score {ep['score']:,.1f}  "
+            f"  game {i:2d}: score {ep['score']:,}  "
             f"segments {ep['segments_destroyed']}  "
             f"spiders {ep['spiders_destroyed']}"
         )
@@ -214,8 +214,12 @@ def _run_parallel_eval(
         info = locals_["info"]
         if "episode" not in info:
             return
+        if "arcade_score" in info:
+            game_score = int(info["arcade_score"])
+        else:
+            game_score = int(round(float(info.get("score", 0))))
         episodes.append({
-            "score": round(float(info.get("score", info["episode"]["r"])), 1),
+            "score": game_score,
             "segments_destroyed": int(info.get("segments_destroyed", 0)),
             "spiders_destroyed": int(info.get("spiders_destroyed", 0)),
         })
@@ -316,7 +320,7 @@ class EvalProgressCallback(BaseCallback):
             self.num_timesteps,
         )
         mean_score = round(
-            sum(ep["score"] for ep in episodes) / max(1, len(episodes)), 1
+            sum(ep["score"] for ep in episodes) / max(1, len(episodes))
         )
         mean_segments = round(
             sum(ep["segments_destroyed"] for ep in episodes) / max(1, len(episodes)), 1

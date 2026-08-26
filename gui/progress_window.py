@@ -6,8 +6,12 @@ background thread, and updates the UI every second via a thread-safe queue.
 from __future__ import annotations
 
 import json
+import math
+import os
 import queue
+import signal
 import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
@@ -37,10 +41,12 @@ def _fmt_steps(steps: int) -> str:
 class EvalScoreChart(tk.Canvas):
     """Simple line chart for eval mean scores over training steps."""
 
-    _MARGIN_LEFT = 52
+    _MARGIN_LEFT = 56
     _MARGIN_RIGHT = 12
     _MARGIN_TOP = 16
     _MARGIN_BOTTOM = 28
+    _Y_STEP = 10_000
+    _X_STEP = 1_000_000
 
     def __init__(self, parent: tk.Widget, width: int = 420, height: int = 180,
                  eval_freq: int = 30_000, n_eval_episodes: int = 10, **kwargs):
@@ -55,8 +61,13 @@ class EvalScoreChart(tk.Canvas):
         )
         self._eval_freq = eval_freq
         self._n_eval_episodes = n_eval_episodes
+        self._total_steps = 1_000_000
         self._points: list[tuple[int, float]] = []
         self.bind("<Configure>", self._on_resize)
+
+    def set_total_steps(self, total: int) -> None:
+        self._total_steps = max(total, 1)
+        self._redraw()
 
     def add_point(self, steps: int, mean_score: float) -> None:
         self._points.append((steps, mean_score))
@@ -79,12 +90,52 @@ class EvalScoreChart(tk.Canvas):
 
         self.create_text(
             w // 2, 8,
-            text=f"Eval score ({self._n_eval_episodes}-game avg, deterministic)",
+            text=f"Game score ({self._n_eval_episodes}-game avg, deterministic)",
             font=("TkDefaultFont", 9, "bold"),
             fill="#333333",
         )
 
         if not self._points:
+            steps_max = max(
+                math.ceil(self._total_steps / self._X_STEP) * self._X_STEP,
+                self._X_STEP,
+            )
+            steps_min = 0
+            y_min = 0
+            y_max = self._Y_STEP
+
+            def x_pos_empty(steps: int) -> float:
+                return plot_l + (steps - steps_min) / (steps_max - steps_min) * plot_w
+
+            def y_pos_empty(score: float) -> float:
+                return plot_b - (score - y_min) / (y_max - y_min) * plot_h
+
+            self.create_line(plot_l, plot_t, plot_l, plot_b, fill="#999999")
+            self.create_line(plot_l, plot_b, plot_r, plot_b, fill="#999999")
+
+            y = y_min
+            while y <= y_max + 0.001:
+                yp = y_pos_empty(y)
+                self.create_line(plot_l, yp, plot_r, yp, fill="#e8e8e8")
+                self.create_line(plot_l - 3, yp, plot_l, yp, fill="#999999")
+                label = "0" if y == 0 else (f"{y / 1_000:.0f}k" if y >= 1_000 else str(int(y)))
+                self.create_text(
+                    plot_l - 6, yp, text=label, anchor="e",
+                    font=("TkDefaultFont", 8), fill="#666666",
+                )
+                y += self._Y_STEP
+
+            steps = steps_min
+            while steps <= steps_max:
+                xp = x_pos_empty(steps)
+                self.create_line(xp, plot_t, xp, plot_b, fill="#e8e8e8")
+                self.create_line(xp, plot_b, xp, plot_b + 3, fill="#999999")
+                self.create_text(
+                    xp, plot_b + 10, text=_fmt_steps(steps),
+                    font=("TkDefaultFont", 8), fill="#666666",
+                )
+                steps += self._X_STEP
+
             self.create_text(
                 w // 2, (plot_t + plot_b) // 2,
                 text=f"Waiting for first evaluation at {_fmt_steps(self._eval_freq)} steps…",
@@ -94,19 +145,17 @@ class EvalScoreChart(tk.Canvas):
             return
 
         scores = [p[1] for p in self._points]
-        y_min = min(scores)
-        y_max = max(scores)
-        if y_min == y_max:
-            y_min -= 1.0
-            y_max += 1.0
-        pad = (y_max - y_min) * 0.1 or 1.0
-        y_min -= pad
-        y_max += pad
+        y_min = math.floor(min(scores) / self._Y_STEP) * self._Y_STEP
+        y_max = math.ceil(max(scores) / self._Y_STEP) * self._Y_STEP
+        if y_max <= y_min:
+            y_max = y_min + self._Y_STEP
 
-        steps_min = self._points[0][0]
-        steps_max = self._points[-1][0]
-        if steps_min == steps_max:
-            steps_max = steps_min + 1
+        steps_max = max(self._total_steps, self._points[-1][0])
+        steps_max = max(
+            math.ceil(steps_max / self._X_STEP) * self._X_STEP,
+            self._X_STEP,
+        )
+        steps_min = 0
 
         def x_pos(steps: int) -> float:
             return plot_l + (steps - steps_min) / (steps_max - steps_min) * plot_w
@@ -118,18 +167,30 @@ class EvalScoreChart(tk.Canvas):
         self.create_line(plot_l, plot_t, plot_l, plot_b, fill="#999999")
         self.create_line(plot_l, plot_b, plot_r, plot_b, fill="#999999")
 
-        # Y-axis labels (min, mid, max)
-        for val in (y_min, (y_min + y_max) / 2, y_max):
-            y = y_pos(val)
-            self.create_line(plot_l - 3, y, plot_l, y, fill="#999999")
-            label = f"{val:,.0f}" if abs(val) >= 10 else f"{val:.1f}"
-            self.create_text(plot_l - 6, y, text=label, anchor="e", font=("TkDefaultFont", 8), fill="#666666")
+        # Y-axis grid and labels every 10k score
+        y = y_min
+        while y <= y_max + 0.001:
+            yp = y_pos(y)
+            self.create_line(plot_l, yp, plot_r, yp, fill="#e8e8e8")
+            self.create_line(plot_l - 3, yp, plot_l, yp, fill="#999999")
+            label = "0" if y == 0 else (f"{y / 1_000:.0f}k" if y >= 1_000 else str(int(y)))
+            self.create_text(
+                plot_l - 6, yp, text=label, anchor="e",
+                font=("TkDefaultFont", 8), fill="#666666",
+            )
+            y += self._Y_STEP
 
-        # X-axis labels (first, last step)
-        for steps in (steps_min, steps_max):
-            x = x_pos(steps)
-            self.create_line(x, plot_b, x, plot_b + 3, fill="#999999")
-            self.create_text(x, plot_b + 10, text=_fmt_steps(steps), font=("TkDefaultFont", 8), fill="#666666")
+        # X-axis grid and labels every 1M steps
+        steps = steps_min
+        while steps <= steps_max:
+            xp = x_pos(steps)
+            self.create_line(xp, plot_t, xp, plot_b, fill="#e8e8e8")
+            self.create_line(xp, plot_b, xp, plot_b + 3, fill="#999999")
+            self.create_text(
+                xp, plot_b + 10, text=_fmt_steps(steps),
+                font=("TkDefaultFont", 8), fill="#666666",
+            )
+            steps += self._X_STEP
 
         # Data line and points
         coords: list[float] = []
@@ -164,6 +225,7 @@ class ProgressWindow(tk.Toplevel):
         self._start_time = time.monotonic()
         self._total = 1
         self._finished = False
+        self._done_cb_called = False
 
         self._build_ui()
         self._start_process()
@@ -193,7 +255,7 @@ class ProgressWindow(tk.Toplevel):
             ("Elapsed",         "elapsed",    "—"),
             ("ETA",             "eta",        "—"),
             ("Steps / sec",     "sps",        "—"),
-            ("Eval score",      "eval_score", "—"),
+            ("Game score",      "eval_score", "—"),
         ]
         for i, (label, key, initial) in enumerate(rows):
             tk.Label(grid, text=label, anchor="w", width=18,
@@ -222,8 +284,44 @@ class ProgressWindow(tk.Toplevel):
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            start_new_session=True,
         )
         threading.Thread(target=self._reader_thread, daemon=True).start()
+
+    def _kill_process_tree(self) -> None:
+        """Terminate the training process and all SubprocVecEnv worker children."""
+        if not self._proc or self._proc.poll() is not None:
+            return
+
+        if sys.platform == "win32":
+            self._proc.terminate()
+        else:
+            try:
+                os.killpg(self._proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+            except PermissionError:
+                self._proc.terminate()
+
+        try:
+            self._proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            if sys.platform != "win32":
+                try:
+                    os.killpg(self._proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            self._proc.kill()
+            try:
+                self._proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+
+    def _notify_done_once(self) -> None:
+        if self._done_cb_called:
+            return
+        self._done_cb_called = True
+        self._on_done()
 
     def _reader_thread(self) -> None:
         assert self._proc and self._proc.stdout
@@ -258,6 +356,7 @@ class ProgressWindow(tk.Toplevel):
 
         elif t == "start":
             self._total = msg["total"]
+            self._chart.set_total_steps(self._total)
             self._stat_vars["status"].set("Training…")
             self._stat_vars["steps"].set(f"0 / {self._total:,}")
             self._stat_vars["remaining"].set(f"{self._total:,}")
@@ -276,10 +375,14 @@ class ProgressWindow(tk.Toplevel):
             self._stat_vars["sps"].set(f"{msg['steps_per_sec']:,.0f}")
 
         elif t == "eval":
-            mean_score = msg.get("mean_score")
             steps = msg.get("steps", 0)
+            mean_score = msg.get("mean_score")
+            if mean_score is None:
+                episodes = msg.get("episodes") or []
+                if episodes:
+                    mean_score = sum(ep["score"] for ep in episodes) / len(episodes)
             if mean_score is not None:
-                self._stat_vars["eval_score"].set(f"{mean_score:,.1f}  @ {steps:,} steps")
+                self._stat_vars["eval_score"].set(f"{mean_score:,.0f}  @ {steps:,} steps")
                 self._chart.add_point(steps, float(mean_score))
 
         elif t == "done":
@@ -291,20 +394,24 @@ class ProgressWindow(tk.Toplevel):
             self._stat_vars["remaining"].set("0")
             self._cancel_btn.config(text="Close", command=self._close_clean)
             self._finished = True
-            self._on_done()
+            self._notify_done_once()
 
         elif t == "_eof":
             if not self._finished:
                 self._stat_vars["status"].set("Process ended")
                 self._cancel_btn.config(text="Close", command=self._close_clean)
                 self._finished = True
-                self._on_done()
+                self._notify_done_once()
 
     # ── close handling ────────────────────────────────────────────────────
 
     def _on_close(self) -> None:
         if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+            self._kill_process_tree()
+            if not self._finished:
+                self._stat_vars["status"].set("Cancelled")
+                self._finished = True
+                self._notify_done_once()
         self._close_clean()
 
     def _close_clean(self) -> None:
