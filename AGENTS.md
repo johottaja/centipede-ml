@@ -53,9 +53,9 @@ Reward values are constructor params (also settable per-run from the GUI):
 Standard `gymnasium.Env` wrapper.
 
 - **Observation space:** `Box(0, 255, shape=(31, 30, 24), dtype=uint8)` — 4 stacked occupancy frames × 6 channels (player, mushrooms, centipede heads, centipede body, spiders, bullet). Each channel encodes fractional tile occupancy (0–255).
-- **Action repeat:** agent picks one action every 4 game frames (`frame_skip=4` for training/watch; `frame_skip=1` for human play). Rewards are summed across repeated frames.
+- **Action repeat:** agent picks one action every 4 game frames (`frame_skip=4` for training/watch; `frame_skip=1` for human play). Rewards are summed across repeated frames, then clipped to [-1, 1].
 - **Action space:** `Discrete(9)` — NOOP / LEFT / RIGHT / UP / DOWN, plus LEFT/RIGHT/UP/DOWN with FIRE. No stand-and-fire action; fire actions still shoot when movement is blocked by a wall or the player-zone edge.
-- **Reward:** score delta per agent step (includes survival bonus and proximity shaping)
+- **Reward:** score delta per agent step (includes survival bonus and proximity shaping), clipped to [-1, 1]
 - **Terminated:** player loses all 3 lives
 - **`step()` info dict:** `{"score": int, "lives": int, "segments_destroyed": int, "spiders_destroyed": int}`
 
@@ -64,7 +64,7 @@ Standard `gymnasium.Env` wrapper.
 ## core/train.py — C51 Training
 
 Runs `C51` (Categorical DQN with `C51Policy` + custom `GridCNN` feature extractor) via Stable-Baselines3.
-Each action-value is a categorical distribution over `n_atoms` (default 51) support points in `[v_min, v_max]`.
+Each action-value is a categorical distribution over `n_atoms` (default 51) support points in `[v_min, v_max]` (defaults -10 and 10). Gradients are clipped to `max_grad_norm` (default 10).
 Uses n-step returns (default 4, Rainbow) and optional prioritized replay.
 Spawned as a subprocess by the GUI; communicates progress via newline-delimited JSON on **stdout** (for the progress window). Human-readable logs (eval scores, progress, checkpoints) go to **stderr** — use `--quiet` for JSON-only output.
 
