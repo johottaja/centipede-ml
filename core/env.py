@@ -6,7 +6,8 @@ Observation : uint8 occupancy grid, shape (ROWS, COLS, OCCUPANCY_CHANNELS * fram
               spiders, bullet) with values 0–255 encoding fractional tile occupancy.
               Default frame_skip=4 stacks 4 consecutive frames → shape (31, 30, 24).
 Action space: Discrete(10) – 5 moves + 4 move-and-fire + stand-and-fire
-Reward       : score delta per agent step (summed across repeated frames)
+Reward       : score delta per agent step (summed across repeated frames),
+               clipped to [-1, 1]
 Terminated   : player loses all lives
 """
 from __future__ import annotations
@@ -151,7 +152,13 @@ class CentipedeEnv(gym.Env):
             "segments_destroyed": self._engine.segments_destroyed,
             "spiders_destroyed": self._engine.spiders_destroyed,
         }
-        return self._obs_buf.copy(), float(total_reward), terminated, truncated, info
+        return (
+            self._obs_buf.copy(),
+            float(np.clip(total_reward, -1.0, 1.0)),
+            terminated,
+            truncated,
+            info,
+        )
 
     # ------------------------------------------------------------------
     def render(self) -> np.ndarray | None:

@@ -20,8 +20,9 @@
   "net-arch": "512",
   "dueling": "true",
   "n-atoms": "51",
-  "v-min": "-3",
-  "v-max": "45",
+  "v-min": "-10",
+  "v-max": "10",
+  "max-grad-norm": "10",
   "prioritized-replay": "true",
   "per-alpha": "0.5",
   "per-beta": "0.4",
@@ -37,5 +38,5 @@
   "reward-survival": "0",
   "reward-proximity-penalty": "0",
   "proximity-distance-tiles": "3",
-  "watch-model": "models/dqn_centipede_ckpt_11993088_steps"
+  "watch-model": "models/dqn_centipede_ckpt_11243520_steps"
 }

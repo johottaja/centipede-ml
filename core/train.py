@@ -359,8 +359,9 @@ def train(
     n_eval_episodes: int = 10,
     checkpoint_freq: int = 100_000,
     n_atoms: int = 51,
-    v_min: float = -10_000.0,
-    v_max: float = 10_000.0,
+    v_min: float = -10.0,
+    v_max: float = 10.0,
+    max_grad_norm: float = 10.0,
     dueling: bool = True,
     prioritized_replay: bool = True,
     per_alpha: float = 0.6,
@@ -457,6 +458,7 @@ def train(
             "v_max": v_max,
             "dueling": dueling,
         },
+        max_grad_norm=max_grad_norm,
         prioritized_replay=prioritized_replay,
         prioritized_replay_alpha=per_alpha,
         prioritized_replay_beta=per_beta,
@@ -468,7 +470,8 @@ def train(
     _emit({"type": "start", "total": total_timesteps})
     _log(
         f"training (C51) | {total_timesteps:,} steps | {n_envs} envs | "
-        f"{n_atoms} atoms [{v_min:,.0f}, {v_max:,.0f}] | "
+        f"{n_atoms} atoms [{v_min:g}, {v_max:g}] | "
+        f"max_grad_norm={max_grad_norm:g} | "
         f"{'dueling' if dueling else 'single-stream'} | "
         f"n-step={n_steps} | "
         f"{'PER α=' + str(per_alpha) + ' β=' + str(per_beta) if prioritized_replay else 'uniform replay'} | "
@@ -534,6 +537,8 @@ if __name__ == "__main__":
                         help="Minimum support value for C51 atoms")
     parser.add_argument("--v-max", type=float,
                         help="Maximum support value for C51 atoms")
+    parser.add_argument("--max-grad-norm", type=float,
+                        help="Gradient clipping threshold (L2 norm)")
     parser.add_argument("--dueling", type=str, choices=["true", "false"],
                         help="Use dueling value/advantage streams (Wang et al. 2016)")
     parser.add_argument("--prioritized-replay", type=str, choices=["true", "false"],
@@ -583,6 +588,7 @@ if __name__ == "__main__":
         n_atoms=args.n_atoms,
         v_min=args.v_min,
         v_max=args.v_max,
+        max_grad_norm=args.max_grad_norm,
         dueling=args.dueling,
         prioritized_replay=args.prioritized_replay,
         per_alpha=args.per_alpha,
