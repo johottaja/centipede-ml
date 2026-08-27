@@ -30,7 +30,7 @@
   "reward-mushroom-destroy": "0.05",
   "reward-body-hit": "0.1",
   "reward-head-hit": "1",
-  "reward-depth-discount": "0.5",
+  "reward-depth-discount": "0.1",
   "reward-depth-discount-fn": "linear",
   "reward-spider-hit": "1",
   "reward-spider-penalty": "1",
