@@ -3,46 +3,9 @@ import os
 import tkinter as tk
 from tkinter import ttk
 
+from core.hparams import FIELD_SPECS, SETTINGS_PATH, SPECS
+
 from .tooltip import make_tooltip
-
-SETTINGS_PATH = "settings.json"
-
-# Each entry is either:
-#   ("section", "Section Title")                          — a visual divider/header
-#   (label, cli-key, default, type, min, max, tooltip)
-#   For type "choice": min holds the list of allowed values, max is unused.
-SPECS: list[tuple] = [
-    ("section", "Training"),
-    ("Timesteps",              "timesteps",              "1000000", "int",   1,    None, "Total environment steps to train for"),
-    ("Seed",                   "seed",                   "0",       "int",   0,    None, "Random seed for reproducibility"),
-
-    ("section", "PPO"),
-    ("Learning rate",          "learning-rate",  "0.0003",  "float", 0,    1,    "Adam optimizer learning rate"),
-    ("Rollout steps (n_steps)","n-steps",        "2048",    "int",   1,    None, "Steps collected per environment per update; must be divisible by batch size"),
-    ("Batch size",             "batch-size",     "64",      "int",   1,    None, "Mini-batch size for each gradient update"),
-    ("Epochs per update",      "n-epochs",       "10",      "int",   1,    None, "Number of passes over the rollout buffer per update"),
-    ("Gamma (discount)",       "gamma",          "0.99",    "float", 0,    1,    "Discount factor for future rewards"),
-    ("GAE lambda",             "gae-lambda",     "0.95",    "float", 0,    1,    "Bias-variance trade-off for Generalised Advantage Estimation"),
-    ("Clip range",             "clip-range",     "0.2",     "float", 0,    1,    "PPO clipping parameter for the surrogate objective"),
-    ("Entropy coefficient",    "ent-coef",       "0.01",    "float", 0,    None, "Entropy bonus coefficient to encourage exploration"),
-    ("Value fn coefficient",   "vf-coef",        "0.5",     "float", 0,    1,    "Weight of the value function loss in the total loss"),
-    ("Max gradient norm",      "max-grad-norm",  "0.5",     "float", 0,    None, "Max norm for gradient clipping"),
-    ("Net architecture",       "net-arch",       "256,256", "str",   None, None, "Hidden layer sizes, comma-separated (e.g. 256,256)"),
-
-    ("section", "Rewards"),
-    ("Mushroom hit",           "reward-mushroom-hit",     "1",      "int",   0,    None, "Reward for hitting a mushroom without destroying it"),
-    ("Mushroom destroy",       "reward-mushroom-destroy", "5",      "int",   0,    None, "Reward for fully destroying a mushroom"),
-    ("Body segment hit",       "reward-body-hit",         "10",     "int",   0,    None, "Reward for hitting a centipede body segment"),
-    ("Head hit",               "reward-head-hit",         "100",    "int",   0,    None, "Reward for hitting the centipede head"),
-    ("Depth discount",         "reward-depth-discount",   "0.0",    "float", 0,    1,    "Fraction by which hit rewards are reduced at the bottom row (0 = disabled, 1 = zero reward at bottom)"),
-    ("Depth discount fn",      "reward-depth-discount-fn","linear", "choice", ["linear", "exponential"], None, "Shape of the depth discount curve"),
-    ("Spider hit",             "reward-spider-hit",        "300",    "int",   0,    None, "Reward for shooting a spider"),
-    ("Spider collision penalty","reward-spider-penalty",   "0",      "int",   0,    None, "Penalty (subtracted) when a spider touches the player"),
-    ("Centipede collision penalty","reward-centipede-penalty","0",   "int",   0,    None, "Penalty (subtracted) when a centipede segment touches the player"),
-]
-
-# Only the field entries (not section headers) — used for validation and reset
-FIELD_SPECS = [s for s in SPECS if s[0] != "section"]
 
 
 class HParamPanel(tk.Frame):
@@ -110,7 +73,14 @@ class HParamPanel(tk.Frame):
             self._vars[key].set(default)
 
     def save(self, path: str = SETTINGS_PATH) -> None:
-        data = {key: var.get() for key, var in self._vars.items()}
+        data: dict = {}
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        data.update({key: var.get() for key, var in self._vars.items()})
         try:
             with open(path, "w") as f:
                 json.dump(data, f, indent=2)

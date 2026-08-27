@@ -53,7 +53,7 @@ Reward values are constructor params (also settable per-run from the GUI):
 Standard `gymnasium.Env` wrapper.
 
 - **Observation space:** `Box(low=0, high=5, shape=(930,), dtype=uint8)` — flat 30×31 grid where each cell encodes: `0`=empty, `1`=mushroom, `2`=body, `3`=head, `4`=player, `5`=bullet
-- **Action space:** `Discrete(6)` — NOOP / LEFT / RIGHT / UP / DOWN / FIRE
+- **Action space:** `Discrete(9)` — NOOP / LEFT / RIGHT / UP / DOWN, plus LEFT/RIGHT/UP/DOWN with FIRE (shot requires actual movement)
 - **Reward:** score delta per step
 - **Terminated:** player loses all 3 lives
 - **`step()` info dict:** `{"score": int, "lives": int, "segments_destroyed": int}`

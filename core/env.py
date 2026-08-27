@@ -1,20 +1,17 @@
 """
 Gymnasium environment for Centipede.
 
-Observation : entity-centric float32 vector of length RELATIVE_OBS_SIZE (105)
-              Layout:
-                [0..83]   12 centipede segment slots × 7 features
-                          (rel_x, rel_y, vel_x, vel_y, is_alive, is_head, dist_to_obstacle)
-                [84..86]  bullet (rel_x, rel_y, is_alive)
-                [87..96]  2 spider slots × 5 features
-                          (rel_x, rel_y, vel_x, vel_y, is_alive)
-                [97..104] 8-way lidar distances from player — walls + mushrooms only
-                          (N, NE, E, SE, S, SW, W, NW)
-Action space: Discrete(6)  – see game.ACTION_* constants
-Reward       : score delta per step
+Observation : uint8 occupancy grid, shape (ROWS, COLS, OCCUPANCY_CHANNELS * frame_skip).
+              Each frame contributes 6 channels (player, mushrooms, heads, body,
+              spiders, bullet) with values 0–255 encoding fractional tile occupancy.
+              Default frame_skip=4 stacks 4 consecutive frames → shape (31, 30, 24).
+Action space: Discrete(10) – 5 moves + 4 move-and-fire + stand-and-fire
+Reward       : score delta per agent step (summed across repeated frames)
 Terminated   : player loses all lives
 """
 from __future__ import annotations
+
+from collections.abc import Callable
 
 import numpy as np
 import pygame
@@ -23,7 +20,11 @@ from gymnasium import spaces
 
 from core.game import (
     GameEngine,
-    WIDTH, HEIGHT, NUM_ACTIONS,
+    ROWS,
+    COLS,
+    WIDTH,
+    HEIGHT,
+    NUM_ACTIONS,
 )
 
 
@@ -33,27 +34,38 @@ class CentipedeEnv(gym.Env):
     def __init__(
         self,
         render_mode: str | None = None,
-        reward_mushroom_hit: int = 1,
-        reward_mushroom_destroy: int = 5,
-        reward_body_hit: int = 10,
-        reward_head_hit: int = 100,
+        frame_skip: int = 4,
+        reward_mushroom_hit: float = 1,
+        reward_mushroom_destroy: float = 5,
+        reward_body_hit: float = 10,
+        reward_head_hit: float = 100,
         reward_depth_discount: float = 0.0,
         reward_depth_discount_fn: str = "linear",
-        reward_spider_hit: int = 300,
-        reward_spider_penalty: int = 0,
-        reward_centipede_penalty: int = 0,
+        reward_spider_hit: float = 300,
+        reward_spider_penalty: float = 1000,
+        reward_centipede_penalty: float = 1000,
+        reward_survival: float = 0.01,
+        reward_proximity_penalty: float = 1.0,
+        proximity_distance_tiles: int = 3,
+        window_size: tuple[int, int] | None = None,
+        present_fn: Callable[[pygame.Surface], None] | None = None,
     ):
         super().__init__()
         assert render_mode in (None, "human", "rgb_array"), \
             f"Unsupported render_mode: {render_mode}"
+        assert frame_skip >= 1
         self.render_mode = render_mode
+        self.frame_skip = frame_skip
+        self.render_fps = self.metadata["render_fps"]
+        self.window_size = window_size or (WIDTH, HEIGHT)
+        self.present_fn = present_fn
 
-        # Entity-centric float32 vector; see module docstring for layout.
+        n_channels = GameEngine.OCCUPANCY_CHANNELS * frame_skip
         self.observation_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(GameEngine.RELATIVE_OBS_SIZE,),
-            dtype=np.float32,
+            low=0,
+            high=255,
+            shape=(ROWS, COLS, n_channels),
+            dtype=np.uint8,
         )
         self.action_space = spaces.Discrete(NUM_ACTIONS)
 
@@ -67,10 +79,16 @@ class CentipedeEnv(gym.Env):
             reward_spider_hit=reward_spider_hit,
             reward_spider_penalty=reward_spider_penalty,
             reward_centipede_penalty=reward_centipede_penalty,
+            reward_survival=reward_survival,
+            reward_proximity_penalty=reward_proximity_penalty,
+            proximity_distance_tiles=proximity_distance_tiles,
         )
-        self._obs_buf = np.zeros(GameEngine.RELATIVE_OBS_SIZE, dtype=np.float32)
-        self._surf: pygame.Surface | None = None   # off-screen surface
-        self._window: pygame.Surface | None = None  # on-screen window (human mode)
+        if render_mode == "human":
+            self._engine.show_arcade_score = True
+        self._n_ch = GameEngine.OCCUPANCY_CHANNELS
+        self._obs_buf = np.zeros((ROWS, COLS, n_channels), dtype=np.uint8)
+        self._surf: pygame.Surface | None = None
+        self._window: pygame.Surface | None = None
         self._clock: pygame.time.Clock | None = None
         self._font: pygame.font.Font | None = None
 
@@ -86,7 +104,7 @@ class CentipedeEnv(gym.Env):
         if self._surf is None:
             self._surf = pygame.Surface((WIDTH, HEIGHT))
         if self.render_mode == "human" and self._window is None:
-            self._window = pygame.display.set_mode((WIDTH, HEIGHT))
+            self._window = pygame.display.set_mode(self.window_size)
             pygame.display.set_caption("Centipede")
             self._clock = pygame.time.Clock()
 
@@ -101,19 +119,39 @@ class CentipedeEnv(gym.Env):
         self._engine.reset(seed=seed)
         if self.render_mode is not None:
             self._init_pygame()
-        return self._get_obs(), {}
+        n = self._n_ch
+        self._engine.get_occupancy_obs(out=self._obs_buf[:, :, :n])
+        src = self._obs_buf[:, :, :n]
+        for i in range(1, self.frame_skip):
+            self._obs_buf[:, :, i * n : (i + 1) * n] = src
+        return self._obs_buf.copy(), {}
 
     # ------------------------------------------------------------------
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
-        reward, terminated, truncated = self._engine.step(int(action))
-        obs = self._get_obs()
+        total_reward = 0.0
+        terminated = False
+        truncated = False
+
+        n = self._n_ch
+        for i in range(self.frame_skip):
+            reward, terminated, truncated = self._engine.step(int(action))
+            total_reward += reward
+            self._engine.get_occupancy_obs(
+                out=self._obs_buf[:, :, i * n : (i + 1) * n]
+            )
+            if self.render_mode == "human":
+                self.render()
+            if terminated or truncated:
+                break
+
         info = {
             "score": self._engine.score,
+            "arcade_score": self._engine.arcade_score,
             "lives": self._engine.player.lives,
             "segments_destroyed": self._engine.segments_destroyed,
             "spiders_destroyed": self._engine.spiders_destroyed,
         }
-        return obs, float(reward), terminated, truncated, info
+        return self._obs_buf.copy(), float(total_reward), terminated, truncated, info
 
     # ------------------------------------------------------------------
     def render(self) -> np.ndarray | None:
@@ -123,9 +161,14 @@ class CentipedeEnv(gym.Env):
         self._engine.render(self._surf, self._font)
 
         if self.render_mode == "human":
+            pygame.event.pump()
+            if self.window_size != (WIDTH, HEIGHT):
+                self._window.fill((14, 16, 22))
             self._window.blit(self._surf, (0, 0))
+            if self.present_fn is not None:
+                self.present_fn(self._window)
             pygame.display.flip()
-            self._clock.tick(self.metadata["render_fps"])
+            self._clock.tick(self.render_fps)
             return None
 
         if self.render_mode == "rgb_array":
@@ -141,8 +184,3 @@ class CentipedeEnv(gym.Env):
             self._window = None
         if pygame.get_init():
             pygame.quit()
-
-    # ------------------------------------------------------------------
-    def _get_obs(self) -> np.ndarray:
-        self._engine.get_relative_obs(out=self._obs_buf)
-        return self._obs_buf.copy()
