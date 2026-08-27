@@ -1,5 +1,5 @@
 {
-  "timesteps": "15000000",
+  "timesteps": "8000000",
   "n-envs": "256",
   "seed": "0",
   "eval-freq": "250000",
@@ -30,7 +30,7 @@
   "reward-mushroom-destroy": "0.05",
   "reward-body-hit": "0.1",
   "reward-head-hit": "1",
-  "reward-depth-discount": "0.1",
+  "reward-depth-discount": "0.5",
   "reward-depth-discount-fn": "linear",
   "reward-spider-hit": "1",
   "reward-spider-penalty": "1",
@@ -38,5 +38,5 @@
   "reward-survival": "0",
   "reward-proximity-penalty": "0",
   "proximity-distance-tiles": "3",
-  "watch-model": "models/dqn_centipede_ckpt_11243520_steps"
+  "watch-model": "models/dqn_centipede_ckpt_42_steps"
 }

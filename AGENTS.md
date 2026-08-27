@@ -7,7 +7,7 @@ centipede/
 ├── core/
 │   ├── game.py                  # Headless GameEngine + all game objects
 │   ├── env.py                   # Gymnasium wrapper (CentipedeEnv) around GameEngine
-│   ├── train.py                 # PPO training script (Stable-Baselines3)
+│   ├── train.py                 # C51 training script (Stable-Baselines3)
 │   ├── watch.py                 # Watch a trained agent play (visual, pygame window)
 │   └── play.py                  # Human-playable keyboard runner
 ├── gui/
@@ -16,8 +16,8 @@ centipede/
 │   ├── progress_window.py       # Live training-progress window (reads train.py stdout)
 │   └── tooltip.py               # Tooltip helper widget
 └── models/                      # Saved model files (gitignored)
-    ├── ppo_centipede.zip         # Final model (written at end of training)
-    └── ppo_centipede_ckpt_*_steps.zip  # Checkpoints (every 100k steps)
+    ├── dqn_centipede.zip         # Final model (written at end of training)
+    └── dqn_centipede_ckpt_*_steps.zip  # Checkpoints (every 100k steps)
 ```
 
 ---
@@ -54,10 +54,10 @@ Standard `gymnasium.Env` wrapper.
 
 - **Observation space:** `Box(0, 255, shape=(31, 30, 24), dtype=uint8)` — 4 stacked occupancy frames × 6 channels (player, mushrooms, centipede heads, centipede body, spiders, bullet). Each channel encodes fractional tile occupancy (0–255).
 - **Action repeat:** agent picks one action every 4 game frames (`frame_skip=4` for training/watch; `frame_skip=1` for human play). Rewards are summed across repeated frames, then clipped to [-1, 1].
-- **Action space:** `Discrete(9)` — NOOP / LEFT / RIGHT / UP / DOWN, plus LEFT/RIGHT/UP/DOWN with FIRE. No stand-and-fire action; fire actions still shoot when movement is blocked by a wall or the player-zone edge.
+- **Action space:** `Discrete(10)` — NOOP / LEFT / RIGHT / UP / DOWN, plus LEFT/RIGHT/UP/DOWN with FIRE, plus stand-and-fire.
 - **Reward:** score delta per agent step (includes survival bonus and proximity shaping), clipped to [-1, 1]
 - **Terminated:** player loses all 3 lives
-- **`step()` info dict:** `{"score": int, "lives": int, "segments_destroyed": int, "spiders_destroyed": int}`
+- **`step()` info dict:** `{"score": int, "arcade_score": int, "lives": int, "segments_destroyed": int, "spiders_destroyed": int}`
 
 ---
 
