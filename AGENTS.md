@@ -7,7 +7,7 @@ centipede/
 ├── core/
 │   ├── game.py                  # Headless GameEngine + all game objects
 │   ├── env.py                   # Gymnasium wrapper (CentipedeEnv) around GameEngine
-│   ├── train.py                 # DQN training script (Stable-Baselines3)
+│   ├── train.py                 # PPO training script (Stable-Baselines3)
 │   ├── watch.py                 # Watch a trained agent play (visual, pygame window)
 │   └── play.py                  # Human-playable keyboard runner
 ├── gui/
@@ -16,8 +16,8 @@ centipede/
 │   ├── progress_window.py       # Live training-progress window (reads train.py stdout)
 │   └── tooltip.py               # Tooltip helper widget
 └── models/                      # Saved model files (gitignored)
-    ├── dqn_centipede.zip         # Final model (written at end of training)
-    └── dqn_centipede_ckpt_*_steps.zip  # Checkpoints (every 100k steps)
+    ├── ppo_centipede.zip         # Final model (written at end of training)
+    └── ppo_centipede_ckpt_*_steps.zip  # Checkpoints (every 100k steps)
 ```
 
 ---
