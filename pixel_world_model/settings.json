@@ -1,12 +1,10 @@
 {
   "policy_model": "models/dqn_centipede",
-  "dataset": "pixel_world_model/data/default",
-  "transitions": 50000,
+  "dataset": "pixel_world_model/data/diverse",
   "resolution": 128,
   "exploration": 0.1,
   "seed": 0,
-  "validation_fraction": 0.1,
-  "episode_limit": 2000,
+  "episode_limit": 10000,
   "latent_dim": 128,
   "beta": 0.0001,
   "vae_lr": 0.0001,
@@ -25,5 +23,8 @@
   "vae_output": "pixel_world_model/checkpoints/vae",
   "dynamics_output": "pixel_world_model/checkpoints/dynamics",
   "vae_resume": "",
-  "dynamics_resume": ""
+  "dynamics_resume": "",
+  "episodes": 500,
+  "validation_episodes": 50,
+  "samples_per_episode": 100
 }

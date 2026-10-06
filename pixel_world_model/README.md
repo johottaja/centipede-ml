@@ -6,7 +6,7 @@ Launch the independent Tkinter experiment:
 uv run python -m pixel_world_model
 ```
 
-1. **Data:** choose a C51 `.zip` policy and a new, empty dataset directory. Collect trajectories with configurable random actions. The default is 50,000 transitions, 128×128 grayscale, four stacked frames, four game frames per action, and 10% validation trajectories.
+1. **Data:** choose a C51 `.zip` policy and a new, empty dataset directory. Collect trajectories with configurable random actions. The default plays 500 independently seeded episodes: 450 training and 50 validation. It keeps up to 100 randomly chosen samples per episode, one from each equal-duration interval, for up to 45,000 training and 5,000 validation samples. Inputs are 128×128 grayscale with four stacked frames and four game frames per action.
 2. **Step 1: VAE:** train, then choose `best.pt`, a periodic checkpoint, or `final.pt` and inspect reconstructions. The launcher opens a live curve of the running training objective and held-out validation loss. Inspect all four stack frames; confirm blaster, bullets, and centipede segments are resolved. Change the budget/settings and train again if necessary.
 3. **Step 2: Dynamics:** explicitly select the VAE checkpoint, then train the residual latent predictor. Inspect held-out autoregressive predictions, initially over 15 steps.
 
@@ -17,7 +17,7 @@ All settings live in this folder's `settings.json`. The root settings and main l
 CLI flags override this experiment's settings. `--settings PATH` selects another experimental configuration.
 
 ```sh
-uv run python -m pixel_world_model collect --policy-model models/dqn_centipede --dataset pixel_world_model/data/run1
+uv run python -m pixel_world_model collect --policy-model models/dqn_centipede --dataset pixel_world_model/data/run1 --episodes 500 --validation-episodes 50 --samples-per-episode 100
 uv run python -m pixel_world_model train-vae --dataset pixel_world_model/data/run1 --vae-output pixel_world_model/checkpoints/vae_run1
 uv run python -m pixel_world_model inspect-vae --dataset pixel_world_model/data/run1 --vae-checkpoint pixel_world_model/checkpoints/vae_run1/best.pt
 uv run python -m pixel_world_model train-dynamics --dataset pixel_world_model/data/run1 --vae-checkpoint pixel_world_model/checkpoints/vae_run1/best.pt --dynamics-output pixel_world_model/checkpoints/dynamics_run1
@@ -28,7 +28,9 @@ Use `--help` for all configuration options. Paths entered in the launcher resolv
 
 ## Training and artifacts
 
-Frames are uint8 `.npy` shards (512 frames each). Transition indices/actions and episode boundaries are saved separately, with a manifest recording preprocessing and collection settings. Reset frames repeat to fill the initial stack; subsequent channels are separated by four game frames. Stacks and rollouts never cross resets. Long games are cut into configurable maximum-length trajectories so a held-out split is always possible; the final collection budget may cut a trajectory short. True terminal flags remain distinct from these artificial boundaries.
+Frames are uint8 `.npy` shards (512 frames each). Full trajectories are retained on disk, including actions and terminal flags, so four-frame inputs, next-state targets, and 15-step inspection sequences remain genuinely consecutive. Separate `sampled_indices` select the sparsely spaced examples used by both trainers; unselected transitions are context only. This improves diversity per training epoch rather than reducing collection disk usage. Legacy datasets without sampled indices still train on all their transitions. Latent caches encode only selected examples.
+
+Episode seeds are `seed + episode_index`; the split is decided before play using an independent seeded RNG. Sampling uses another RNG independent of action exploration. Short episodes contribute all their transitions when shorter than the sample budget, without duplicates. Games run to natural termination with a configurable safety cap of 10,000 agent transitions per episode. The manifest records each episode seed, split, sample count, and whether it ended naturally, at the cap, or due to cancellation. Reset frames repeat to fill the initial stack; subsequent channels are separated by four game frames. Stacks and rollouts never cross resets. Cancelling produces a partial dataset; its split totals may differ from the requested 450/50.
 
 ### Cloud runs and TensorBoard
 
@@ -78,7 +80,7 @@ uv run python -m unittest discover -s pixel_world_model/tests -v
 The optional native Tkinter smoke test requires a collected tiny dataset in `data/verification/rollout`:
 
 ```sh
-uv run python -m pixel_world_model collect --dataset pixel_world_model/data/verification/rollout --transitions 40 --episode-limit 10 --resolution 64 --device cpu
+uv run python -m pixel_world_model collect --dataset pixel_world_model/data/verification/rollout --episodes 4 --validation-episodes 1 --samples-per-episode 5 --episode-limit 10 --resolution 64 --device cpu
 uv run python -m pixel_world_model.tests.gui_smoke
 ```
 

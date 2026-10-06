@@ -36,6 +36,21 @@ class FrameWriter:
         self.pending.clear()
 
 
+def stratified_indices(start, end, limit, rng):
+    """One uniformly chosen transition per equal-duration bin, without duplicates."""
+    count = min(limit, end-start)
+    if count <= 0:
+        return []
+    edges = np.linspace(start, end, count+1, dtype=np.int64)
+    return [int(rng.integers(left, right)) for left, right in zip(edges[:-1], edges[1:], strict=True)]
+
+
+def episode_splits(episodes, validation_episodes, seed):
+    rng = np.random.default_rng(np.random.SeedSequence([seed, 2]))
+    validation = set(int(i) for i in rng.permutation(episodes)[:validation_episodes])
+    return ['validation' if i in validation else 'train' for i in range(episodes)]
+
+
 def collect(c):
     from pixel_world_model.policy import load_c51_policy, greedy_action, resolve_policy_model
     target = Path(c['dataset'])
@@ -44,6 +59,8 @@ def collect(c):
     target.mkdir(parents=True, exist_ok=True)
     cancel = Cancellation()
     rng = np.random.default_rng(c['seed'])
+    sampling_rng = np.random.default_rng(np.random.SeedSequence([c['seed'], 1]))
+    splits = episode_splits(c['episodes'], c['validation_episodes'], c['seed'])
     device = device_for(c['device'])
     emit('device', device=str(device))
     policy_path = resolve_policy_model(c['policy_model'].removesuffix('.zip'))
@@ -51,54 +68,78 @@ def collect(c):
     writer = FrameWriter(target)
     env = make_rollout_env()
     actions, states, nexts, episode_ids, terminals = [], [], [], [], []
-    episodes = []
+    episodes, sampled_indices = [], []
     start = time.monotonic()
+    emit('start', phase='collection', total=c['episodes'],
+         training_episodes=c['episodes']-c['validation_episodes'], validation_episodes=c['validation_episodes'])
+
+    def report():
+        progress(start, len(episodes), c['episodes'], phase='collection',
+                 played_transitions=len(actions), sampled_transitions=len(sampled_indices),
+                 episode_seed=seed)
+
     try:
-        while len(actions) < c['transitions'] and not cancel.cancelled:
-            eid = len(episodes)
-            obs, _ = env.reset(seed=c['seed'] + eid)
+        for eid in range(c['episodes']):
+            if cancel.cancelled:
+                break
+            seed = c['seed'] + eid
+            obs, _ = env.reset(seed=seed)
             first = writer.add(capture_frame(env, c['resolution']))
             current = first
             begin = len(actions)
-            for _ in range(min(c['episode_limit'], c['transitions']-begin)):
+            terminated = truncated = False
+            for _ in range(c['episode_limit']):
                 if cancel.cancelled:
                     break
                 action = int(rng.integers(10)) if rng.random() < c['exploration'] else greedy_action(policy, obs)
                 obs, _, terminated, truncated, _ = env.step(action)
                 nxt = writer.add(capture_frame(env, c['resolution']))
-                actions.append(action); states.append(current); nexts.append(nxt)
-                episode_ids.append(eid); terminals.append(terminated or truncated)
+                actions.append(action)
+                states.append(current)
+                nexts.append(nxt)
+                episode_ids.append(eid)
+                terminals.append(terminated or truncated)
                 current = nxt
                 if len(actions) % 100 == 0:
-                    progress(start, len(actions), c['transitions'], phase='collection')
+                    report()
                 if terminated or truncated:
                     break
             if len(actions) > begin:
-                episodes.append({'first_frame': first, 'start': begin, 'end': len(actions)})
+                selected = stratified_indices(begin, len(actions), c['samples_per_episode'], sampling_rng)
+                sampled_indices.extend(selected)
+                episodes.append({'first_frame': first, 'start': begin, 'end': len(actions),
+                                 'seed': seed, 'split': splits[eid], 'sample_count': len(selected),
+                                 'ended_by': 'terminal' if terminated else 'truncated' if truncated else
+                                             'cancelled' if cancel.cancelled else 'safety_cap'})
+                report()
             else:
                 break
     finally:
         writer.flush()
         env.close()
     if len(episodes) < 2:
-        raise ValueError('Need at least two trajectories for an episode-separated split. Collect more transitions or reduce episode_limit; select a new output directory.')
-    order = rng.permutation(len(episodes))
-    nval = min(len(episodes)-1, max(1, round(len(episodes)*c['validation_fraction'])))
-    val = set(int(i) for i in order[:nval])
-    for eid, ep in enumerate(episodes):
-        ep['split'] = 'validation' if eid in val else 'train'
+        raise ValueError('Need at least two episodes for validation. Collect again into a new directory.')
+    # A cancelled prefix may contain only one of the preassigned splits.
+    if cancel.cancelled and len({ep['split'] for ep in episodes}) == 1:
+        replacement = 'validation' if episodes[0]['split'] == 'train' else 'train'
+        episodes[-1]['split'] = replacement
+        emit('log', text='Partial collection: reassigned the last episode to retain both splits.')
     np.savez(target / 'transitions.npz', actions=np.asarray(actions, dtype=np.int64),
              states=np.asarray(states), nexts=np.asarray(nexts), episodes=np.asarray(episode_ids),
-             terminals=np.asarray(terminals, dtype=bool))
+             terminals=np.asarray(terminals, dtype=bool), sampled_indices=np.asarray(sampled_indices, dtype=np.int64))
     signature = inspect.signature(CentipedeEnv.__init__)
     rewards = {k: p.default for k, p in signature.parameters.items() if k.startswith('reward_') or k == 'proximity_distance_tiles'}
     meta = {'version': VERSION, 'id': str(uuid.uuid4()), 'resolution': c['resolution'],
             'frame_stack': 4, 'frame_gap': 4, 'shards': writer.shards, 'episodes': episodes,
             'policy_model': policy_path, 'environment_defaults': rewards, 'config': c,
-            'count': len(actions), 'cancelled': cancel.cancelled}
+            'count': len(actions), 'sampled_count': len(sampled_indices),
+            'sampling': 'stratified_episode_v1', 'cancelled': cancel.cancelled}
     (target / 'manifest.json').write_text(json.dumps(meta, indent=2))
-    progress(start, len(actions), c['transitions'], phase='collection')
-    emit('done', dataset=str(target), cancelled=cancel.cancelled)
+    report()
+    emit('done', dataset=str(target), cancelled=cancel.cancelled, played_transitions=len(actions),
+         sampled_transitions=len(sampled_indices),
+         training_episodes=sum(ep['split'] == 'train' for ep in episodes),
+         validation_episodes=sum(ep['split'] == 'validation' for ep in episodes))
 
 
 class TransitionDataset(Dataset):
@@ -109,8 +150,13 @@ class TransitionDataset(Dataset):
             raise ValueError('Incompatible dataset; recollect with this experiment.')
         with np.load(self.root / 'transitions.npz') as data:
             self.transitions = {key: data[key] for key in data.files}
-        self.indices = np.asarray([i for i, eid in enumerate(self.transitions['episodes'])
-                                   if split is None or self.meta['episodes'][int(eid)]['split'] == split], dtype=np.int64)
+        eligible = self.transitions.get('sampled_indices', np.arange(len(self.transitions['actions'])))
+        self.sample_indices = np.asarray(eligible, dtype=np.int64)
+        if (len(self.sample_indices) == 0 or np.any(np.diff(self.sample_indices) <= 0) or
+                self.sample_indices[0] < 0 or self.sample_indices[-1] >= len(self.transitions['actions'])):
+            raise ValueError('Dataset sampled indices are invalid; recollect into a new directory.')
+        self.indices = np.asarray([i for i in self.sample_indices
+                                   if split is None or self.meta['episodes'][int(self.transitions['episodes'][i])]['split'] == split], dtype=np.int64)
         self.starts = [shard['start'] for shard in self.meta['shards']]
         self.cache = OrderedDict()
 

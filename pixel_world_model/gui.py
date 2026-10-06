@@ -10,9 +10,10 @@ from pixel_world_model.config import DEFAULTS, PROJECT, SETTINGS, load, save, va
 
 GROUPS = {
     'Data': [('policy_model', 'C51 policy (.zip)', 'file'), ('dataset', 'Dataset directory', 'directory'),
-             ('transitions', 'Transitions', ''), ('resolution', 'Image resolution', 'resolution'),
+             ('episodes', 'Episodes to play', ''), ('validation_episodes', 'Validation episodes', ''),
+             ('samples_per_episode', 'Samples per episode', ''), ('resolution', 'Image resolution', 'resolution'),
              ('exploration', 'Random action probability', ''), ('seed', 'Seed', ''),
-             ('validation_fraction', 'Validation fraction', ''), ('episode_limit', 'Maximum trajectory steps', '')],
+             ('episode_limit', 'Safety cap (transitions per episode)', '')],
     'Step 1: VAE': [('dataset', 'Dataset directory', 'directory'), ('latent_dim', 'Latent dimension', ''),
                     ('beta', 'KL weight (beta)', ''),
                     ('vae_lr', 'Learning rate', ''),
@@ -334,6 +335,8 @@ class Launcher:
                 if 'epoch' in event:
                     self.stats.set(f"Epoch: {event['epoch']} | Updates: {event['updates']} | " + ' | '.join(f'{"BCE" if k == "reconstruction" else k}: {event[k]:.6g}' for k in ('reconstruction', 'pixel_mse', 'kl', 'latent_mse') if k in event))
                 self.status.set(f"{event.get('phase', '')}: {event['current']}/{event['total']} | elapsed {event['elapsed']:.0f}s | ETA {event['eta']:.0f}s | loss {event.get('loss', '—')}")
+                if 'played_transitions' in event:
+                    self.stats.set(f"Played: {event['played_transitions']} transitions | Selected: {event['sampled_transitions']} samples | Seed: {event['episode_seed']}")
                 if (self.job_command == 'train-vae' and self.loss_plot is not None
                         and event.get('phase') == 'vae' and 'epoch_position' in event and 'loss' in event):
                     self.loss_plot.add_training(event['epoch_position'], event['loss'])

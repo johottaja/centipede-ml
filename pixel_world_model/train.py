@@ -62,8 +62,9 @@ def log_dynamics_previews(writer, dynamics, vae, data, pairs, indices, device, e
     selected = indices[:min(4, len(indices))]
     if not len(selected):
         return
-    z = torch.as_tensor(np.asarray(pairs[selected, 0]), dtype=torch.float32, device=device)
-    target_z = torch.as_tensor(np.asarray(pairs[selected, 1]), dtype=torch.float32, device=device)
+    positions = np.searchsorted(data.sample_indices, selected)
+    z = torch.as_tensor(np.asarray(pairs[positions, 0]), dtype=torch.float32, device=device)
+    target_z = torch.as_tensor(np.asarray(pairs[positions, 1]), dtype=torch.float32, device=device)
     actions = torch.as_tensor(data.transitions['actions'][selected], device=device)
     actual = torch.as_tensor(np.stack([data.raw(int(i))[2] for i in selected]),
                              dtype=torch.float32, device=device) / 255
@@ -83,7 +84,7 @@ def latent_cache(data, vae, vae_id, device, batch, cancel):
     root = data.root / 'latent_cache' / vae_id
     root.mkdir(parents=True, exist_ok=True)
     path = root / 'pairs.npy'
-    shape = (data.meta['count'], 2, vae.latent_dim)
+    shape = (len(data.sample_indices), 2, vae.latent_dim)
     if not path.exists():
         temp = root / 'pairs.partial.npy'
         pairs = np.lib.format.open_memmap(temp, mode='w+', dtype=np.float32, shape=shape)
@@ -91,7 +92,7 @@ def latent_cache(data, vae, vae_id, device, batch, cancel):
         with torch.no_grad():
             for offset in range(0, shape[0], batch):
                 end = min(offset+batch, shape[0])
-                raw = [data.raw(i) for i in range(offset, end)]
+                raw = [data.raw(int(i)) for i in data.sample_indices[offset:end]]
                 for side, item in enumerate((0, 2)):
                     x = torch.as_tensor(np.stack([r[item] for r in raw]), device=device, dtype=torch.float32)/255
                     pairs[offset:end, side] = vae.encode(x)[0].cpu().numpy()
@@ -191,8 +192,9 @@ def train(c, stage):
         if stage == 'vae':
             x = torch.as_tensor(np.stack([data.raw(int(i))[0] for i in indices]), dtype=torch.float32, device=device)/255
             return model.loss(x, c['beta'], sample=sampling)
-        z = torch.tensor(np.asarray(pairs[indices, 0]), device=device)
-        target = torch.tensor(np.asarray(pairs[indices, 1]), device=device)
+        positions = np.searchsorted(data.sample_indices, indices)
+        z = torch.tensor(np.asarray(pairs[positions, 0]), device=device)
+        target = torch.tensor(np.asarray(pairs[positions, 1]), device=device)
         actions = torch.as_tensor(data.transitions['actions'][indices], device=device)
         loss = F.mse_loss(model(z, actions), target)
         return loss, {'latent_mse': loss.item()}
