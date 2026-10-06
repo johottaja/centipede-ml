@@ -10,6 +10,7 @@ dependencies = [
     "opencv-python-headless>=4.13.0.92",
     "pygame-ce>=2.5.7",
     "stable-baselines3>=2.7.1",
+    "tensorboard",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
 ]

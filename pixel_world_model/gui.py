@@ -32,12 +32,155 @@ GROUPS = {
 }
 
 
+class LossPlot:
+    """Live VAE objective plot drawn with Tk's native canvas."""
+    TRAIN_COLOR = '#2563eb'
+    VALIDATION_COLOR = '#d97706'
+
+    def __init__(self, parent, epochs):
+        self.window = tk.Toplevel(parent)
+        self.window.title('VAE loss curve')
+        self.window.geometry('760x440')
+        self.window.minsize(540, 330)
+        self.epochs = max(int(epochs), 1)
+        self.training = []
+        self.validation = []
+        self.train_loss = None
+        self.validation_loss = None
+
+        ttk.Label(self.window, text='VAE objective: BCE + β KL',
+                  font=('TkDefaultFont', 13, 'bold')).pack(anchor='w', padx=16, pady=(14, 2))
+        self.summary = tk.StringVar(value='Waiting for the first training update…')
+        ttk.Label(self.window, textvariable=self.summary).pack(anchor='w', padx=16, pady=(0, 8))
+
+        canvas_bg = self.window.cget('background')
+        legend = ttk.Frame(self.window)
+        legend.pack(anchor='w', padx=16, pady=(0, 4))
+        self._legend_item(legend, 'Training running mean', self.TRAIN_COLOR, canvas_bg, dashed=False)
+        self._legend_item(legend, 'Validation', self.VALIDATION_COLOR, canvas_bg, dashed=True)
+
+        self.canvas = tk.Canvas(self.window, height=300, background=canvas_bg,
+                                highlightthickness=0, borderwidth=0)
+        self.canvas.pack(fill='both', expand=True, padx=12, pady=(0, 12))
+        self.canvas.bind('<Configure>', lambda _event: self._redraw())
+
+    @staticmethod
+    def _legend_item(parent, label, color, background, dashed):
+        sample = tk.Canvas(parent, width=30, height=14, background=background,
+                           highlightthickness=0, borderwidth=0)
+        sample.pack(side='left', padx=(0, 5))
+        options = {'fill': color, 'width': 2}
+        if dashed:
+            options['dash'] = (5, 3)
+        sample.create_line(1, 7, 29, 7, **options)
+        ttk.Label(parent, text=label).pack(side='left', padx=(0, 16))
+
+    def is_open(self):
+        try:
+            return bool(self.window.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def reset(self, epochs):
+        self.epochs = max(int(epochs), 1)
+        self.training.clear()
+        self.validation.clear()
+        self.train_loss = None
+        self.validation_loss = None
+        self.summary.set('Waiting for the first training update…')
+        self.window.deiconify()
+        self.window.lift()
+        self._redraw()
+
+    def add_training(self, epoch_position, loss):
+        self.training.append((float(epoch_position), float(loss)))
+        self.train_loss = float(loss)
+        self._update_summary(epoch_position)
+        self._redraw()
+
+    def add_validation(self, epoch, loss):
+        self.validation.append((float(epoch), float(loss)))
+        self.validation_loss = float(loss)
+        self._update_summary(epoch)
+        self._redraw()
+
+    def _update_summary(self, epoch):
+        values = [f'Epoch {epoch:.2f} / {self.epochs}']
+        if self.train_loss is not None:
+            values.append(f'train {self.train_loss:.5g}')
+        if self.validation_loss is not None:
+            values.append(f'validation {self.validation_loss:.5g}')
+        self.summary.set('   ·   '.join(values))
+
+    def _redraw(self):
+        if not hasattr(self, 'canvas') or not self.is_open():
+            return
+        canvas = self.canvas
+        canvas.delete('all')
+        width, height = canvas.winfo_width(), canvas.winfo_height()
+        if width < 180 or height < 150:
+            return
+
+        left, right, top, bottom = 66, 18, 14, 42
+        plot_width = width - left - right
+        plot_height = height - top - bottom
+        all_points = self.training + self.validation
+        max_loss = max((point[1] for point in all_points), default=1.0)
+        y_max = max(max_loss * 1.1, 1e-6)
+        x_max = float(self.epochs)
+
+        # A light grid keeps the loss scale readable without competing with the curves.
+        for tick in range(5):
+            fraction = tick / 4
+            y = top + plot_height * (1 - fraction)
+            value = y_max * fraction
+            canvas.create_line(left, y, width-right, y, fill='#d9dee7', width=1)
+            canvas.create_text(left-9, y, text=f'{value:.3g}', anchor='e', fill='#4b5563',
+                               font=('TkDefaultFont', 9))
+        for tick in range(5):
+            value = x_max * tick / 4
+            x = left + plot_width * tick / 4
+            canvas.create_line(x, top, x, top+plot_height, fill='#edf0f4', width=1)
+            canvas.create_text(x, top+plot_height+8, text=f'{value:g}', anchor='n', fill='#4b5563',
+                               font=('TkDefaultFont', 9))
+        canvas.create_line(left, top, left, top+plot_height, fill='#6b7280', width=1)
+        canvas.create_line(left, top+plot_height, width-right, top+plot_height, fill='#6b7280', width=1)
+        canvas.create_text(left, 1, text='Loss', anchor='nw', fill='#374151',
+                           font=('TkDefaultFont', 9, 'bold'))
+        canvas.create_text(left+plot_width/2, height-5, text='Epoch', anchor='s', fill='#374151',
+                           font=('TkDefaultFont', 9, 'bold'))
+
+        def coords(points):
+            # Keep the graph responsive on long runs while preserving the full x range.
+            if len(points) > 1200:
+                stride = (len(points)-1) / 1199
+                points = [points[round(index*stride)] for index in range(1200)]
+            return [coordinate for epoch, loss in points for coordinate in (
+                left + plot_width * min(max(epoch / x_max, 0), 1),
+                top + plot_height * (1 - min(max(loss / y_max, 0), 1))) ]
+
+        train_coords = coords(self.training)
+        if len(train_coords) >= 4:
+            canvas.create_line(*train_coords, fill=self.TRAIN_COLOR, width=2, smooth=False)
+        if len(train_coords) >= 2:
+            canvas.create_oval(train_coords[-2]-3, train_coords[-1]-3,
+                               train_coords[-2]+3, train_coords[-1]+3,
+                               fill=self.TRAIN_COLOR, outline=self.TRAIN_COLOR)
+        val_coords = coords(self.validation)
+        if len(val_coords) >= 4:
+            canvas.create_line(*val_coords, fill=self.VALIDATION_COLOR, width=2, dash=(5, 3))
+        for x, y in zip(val_coords[::2], val_coords[1::2]):
+            canvas.create_polygon(x, y-4, x+4, y, x, y+4, x-4, y,
+                                  fill=self.VALIDATION_COLOR, outline=self.VALIDATION_COLOR)
+
+
 class Launcher:
     def __init__(self, root):
         self.root = root
         root.title('Pixel world model — two-stage experiment')
         root.geometry('900x800'); root.minsize(700, 600)
-        self.events = queue.Queue(); self.job = None; self.inspectors = []
+        self.events = queue.Queue(); self.job = None; self.job_command = None; self.inspectors = []
+        self.loss_plot = None
         values = load()
         self.variables = {k: tk.StringVar(value=str(values[k])) for k in DEFAULTS}
         self.buttons = []
@@ -145,11 +288,17 @@ class Launcher:
             self.inspectors.append(proc)
         else:
             self.job = proc
+            self.job_command = command
             self.progress['value'] = 0
             self.cancel['state'] = 'normal'
             for button, cmd in self.buttons:
                 if not cmd.startswith('inspect-'):
                     button['state'] = 'disabled'
+            if command == 'train-vae':
+                if self.loss_plot is None or not self.loss_plot.is_open():
+                    self.loss_plot = LossPlot(self.root, c['vae_epochs'])
+                else:
+                    self.loss_plot.reset(c['vae_epochs'])
         self.status.set(f'Running {command}')
         for stream, structured in ((proc.stdout, True), (proc.stderr, False)):
             threading.Thread(target=self.read, args=(proc, stream, structured), daemon=True).start()
@@ -178,11 +327,16 @@ class Launcher:
                 self.stats.set(f"Device: {event['device']}")
             if proc == self.job and event['type'] == 'validation':
                 self.stats.set(f"Epoch: {event['epoch']} | Validation: " + ' | '.join(f'{"BCE" if k == "reconstruction" else k}: {v:.6g}' for k, v in event.items() if k not in ('type', 'epoch')))
+                if self.job_command == 'train-vae' and self.loss_plot is not None and 'loss' in event:
+                    self.loss_plot.add_validation(event['epoch'], event['loss'])
             if event['type'] == 'progress' and proc == self.job:
                 self.progress['value'] = 100*event['current']/max(event['total'], 1)
                 if 'epoch' in event:
                     self.stats.set(f"Epoch: {event['epoch']} | Updates: {event['updates']} | " + ' | '.join(f'{"BCE" if k == "reconstruction" else k}: {event[k]:.6g}' for k in ('reconstruction', 'pixel_mse', 'kl', 'latent_mse') if k in event))
                 self.status.set(f"{event.get('phase', '')}: {event['current']}/{event['total']} | elapsed {event['elapsed']:.0f}s | ETA {event['eta']:.0f}s | loss {event.get('loss', '—')}")
+                if (self.job_command == 'train-vae' and self.loss_plot is not None
+                        and event.get('phase') == 'vae' and 'epoch_position' in event and 'loss' in event):
+                    self.loss_plot.add_training(event['epoch_position'], event['loss'])
             text = json.dumps(event) if event['type'] != 'log' else event['text']
             self.log.configure(state='normal'); self.log.insert('end', text+'\n')
             if int(self.log.index('end-1c').split('.')[0]) > 500:
@@ -198,6 +352,7 @@ class Launcher:
         if self.job is not None and self.job.poll() is not None:
             code = self.job.returncode
             self.job = None; self.cancel['state'] = 'disabled'
+            self.job_command = None
             for button, _ in self.buttons:
                 button['state'] = 'normal'
             if code:

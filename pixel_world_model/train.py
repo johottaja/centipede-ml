@@ -1,10 +1,12 @@
 """Independent VAE and dynamics trainers with resumable epoch/update progress."""
+import json
 import random
 import time
 from pathlib import Path
 import numpy as np
 import torch
 from torch.nn import functional as F
+from torch.utils.tensorboard import SummaryWriter
 from pixel_world_model.data import TransitionDataset
 from pixel_world_model.nets import VisualVAE, ActionLatentDynamics
 from pixel_world_model.runtime import (VERSION, Cancellation, atomic_save, load_checkpoint,
@@ -26,6 +28,55 @@ def compatible(ck, data):
 
 def preprocessing(data):
     return {k: data.meta[k] for k in ('resolution', 'frame_stack', 'frame_gap')}
+
+
+def log_metrics(writer, stage, split, metrics, step):
+    writer.add_scalar(f'loss/{split}', float(metrics['loss']), step)
+    for name in ('reconstruction', 'pixel_mse', 'kl', 'latent_mse'):
+        if name in metrics:
+            writer.add_scalar(f'{stage}/{name}/{split}', float(metrics[name]), step)
+
+
+@torch.no_grad()
+def log_vae_previews(writer, model, data, indices, device, epoch):
+    selected = indices[:min(4, len(indices))]
+    if not len(selected):
+        return
+    x = torch.as_tensor(np.stack([data.raw(int(i))[0] for i in selected]),
+                        dtype=torch.float32, device=device) / 255
+    reconstruction = model(x, sample=False)[0]
+    writer.add_images('images/validation/input', stack_strip(x).cpu(), epoch, dataformats='NCHW')
+    writer.add_images('images/validation/reconstruction', stack_strip(reconstruction).cpu(),
+                      epoch, dataformats='NCHW')
+    writer.add_images('images/validation/absolute_difference',
+                      stack_strip((reconstruction-x).abs()).cpu(), epoch, dataformats='NCHW')
+
+
+def stack_strip(images):
+    count, channels, height, width = images.shape
+    return images.permute(0, 2, 1, 3).reshape(count, 1, height, channels*width)
+
+
+@torch.no_grad()
+def log_dynamics_previews(writer, dynamics, vae, data, pairs, indices, device, epoch):
+    selected = indices[:min(4, len(indices))]
+    if not len(selected):
+        return
+    z = torch.as_tensor(np.asarray(pairs[selected, 0]), dtype=torch.float32, device=device)
+    target_z = torch.as_tensor(np.asarray(pairs[selected, 1]), dtype=torch.float32, device=device)
+    actions = torch.as_tensor(data.transitions['actions'][selected], device=device)
+    actual = torch.as_tensor(np.stack([data.raw(int(i))[2] for i in selected]),
+                             dtype=torch.float32, device=device) / 255
+    vae_reconstruction = vae.decode(target_z)
+    prediction = vae.decode(dynamics(z, actions))
+    writer.add_images('images/validation/actual_next', stack_strip(actual).cpu(),
+                      epoch, dataformats='NCHW')
+    writer.add_images('images/validation/vae_reconstruction', stack_strip(vae_reconstruction).cpu(),
+                      epoch, dataformats='NCHW')
+    writer.add_images('images/validation/predicted_next', stack_strip(prediction).cpu(),
+                      epoch, dataformats='NCHW')
+    writer.add_images('images/validation/absolute_difference',
+                      stack_strip((actual-prediction).abs()).cpu(), epoch, dataformats='NCHW')
 
 
 def latent_cache(data, vae, vae_id, device, batch, cancel):
@@ -110,6 +161,7 @@ def train(c, stage):
             torch.mps.set_rng_state(ck['mps_rng'].cpu())
     output = Path(c[prefix+'_output'])
     output.mkdir(parents=True, exist_ok=True)
+    (output / 'run_config.json').write_text(json.dumps(c, indent=2) + '\n')
     # Pin a full copy of the VAE to this dynamics run; paths alone are not sufficient.
     if stage == 'dynamics':
         associated = output / 'associated_vae.pt'
@@ -148,60 +200,74 @@ def train(c, stage):
     start = time.monotonic()
     total = epochs * len(train_indices)
     initial_progress = epoch * len(train_indices) + cursor
-    emit('start', stage=stage, total=total)
-    while epoch < epochs and not cancel.cancelled:
-        if order is None:
-            order = rng.permutation(train_indices)
-        model.train()
-        train_sums = {}
-        train_count = 0
-        while cursor < len(order) and not cancel.cancelled:
-            selected = order[cursor:cursor+batch]
-            optimizer.zero_grad(set_to_none=True)
-            loss, metrics = loss_for(selected, True)
-            if not torch.isfinite(loss):
-                raise ValueError('Non-finite loss; lower learning rate or inspect the dataset.')
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 10)
-            optimizer.step()
-            cursor += len(selected); updates += 1
-            for key, value in {'loss': loss.item(), **metrics}.items():
-                train_sums[key] = train_sums.get(key, 0) + value*len(selected)
-            train_count += len(selected)
-            if updates % 10 == 0 or cursor == len(order):
-                running = {key: value/train_count for key, value in train_sums.items()}
-                progress(start, epoch*len(train_indices)+cursor, total, initial=initial_progress, phase=stage, epoch=epoch+1,
-                         epoch_position=(epoch*len(train_indices)+cursor)/len(train_indices),
-                         updates=updates, **running)
-        if cancel.cancelled:
-            break
-        model.eval()
-        sums = {}; count = 0
-        validation_start = time.monotonic()
-        with torch.no_grad():
-            for offset in range(0, len(val_indices), batch):
-                selected = val_indices[offset:offset+batch]
-                loss, metrics = loss_for(selected, False)
+    with SummaryWriter(log_dir=str(output / 'tensorboard'), flush_secs=10) as writer:
+        writer.add_text('run/config', json.dumps(c, indent=2), initial_progress)
+        writer.add_text('run/dataset_id', str(data.meta['id']), initial_progress)
+        writer.flush()
+        emit('start', stage=stage, total=total)
+        while epoch < epochs and not cancel.cancelled:
+            if order is None:
+                order = rng.permutation(train_indices)
+            model.train()
+            train_sums = {}
+            train_count = 0
+            while cursor < len(order) and not cancel.cancelled:
+                selected = order[cursor:cursor+batch]
+                optimizer.zero_grad(set_to_none=True)
+                loss, metrics = loss_for(selected, True)
+                if not torch.isfinite(loss):
+                    raise ValueError('Non-finite loss; lower learning rate or inspect the dataset.')
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 10)
+                optimizer.step()
+                cursor += len(selected); updates += 1
                 for key, value in {'loss': loss.item(), **metrics}.items():
-                    sums[key] = sums.get(key, 0) + value*len(selected)
-                count += len(selected)
-                if offset % (batch * 10) == 0:
-                    progress(validation_start, count, len(val_indices), phase=f'{stage} validation')
-                if cancel.cancelled:
-                    break
-        if cancel.cancelled:
-            break
-        validation = {k: v/count for k, v in sums.items()}
-        if not all(np.isfinite(value) for value in validation.values()):
-            raise ValueError('Non-finite validation loss; lower learning rate and inspect the dataset.')
-        epoch += 1; cursor = 0; order = None
-        emit('validation', epoch=epoch, **validation)
-        if validation['loss'] < best:
-            best = validation['loss']; checkpoint('best.pt')
-        if epoch % c['checkpoint_frequency'] == 0:
-            checkpoint(f'epoch_{epoch:04d}.pt')
-    checkpoint('cancelled.pt' if cancel.cancelled else 'final.pt')
-    emit('done', cancelled=cancel.cancelled, elapsed=time.monotonic()-start, epoch=epoch)
+                    train_sums[key] = train_sums.get(key, 0) + value*len(selected)
+                train_count += len(selected)
+                if updates % 10 == 0 or cursor == len(order):
+                    running = {key: value/train_count for key, value in train_sums.items()}
+                    global_step = epoch*len(train_indices)+cursor
+                    log_metrics(writer, stage, 'train', running, global_step)
+                    progress(start, global_step, total, initial=initial_progress, phase=stage, epoch=epoch+1,
+                             epoch_position=global_step/len(train_indices), updates=updates, **running)
+            if cancel.cancelled:
+                break
+            model.eval()
+            sums = {}; count = 0
+            validation_start = time.monotonic()
+            with torch.no_grad():
+                for offset in range(0, len(val_indices), batch):
+                    selected = val_indices[offset:offset+batch]
+                    loss, metrics = loss_for(selected, False)
+                    for key, value in {'loss': loss.item(), **metrics}.items():
+                        sums[key] = sums.get(key, 0) + value*len(selected)
+                    count += len(selected)
+                    if offset % (batch * 10) == 0:
+                        progress(validation_start, count, len(val_indices), phase=f'{stage} validation')
+                    if cancel.cancelled:
+                        break
+            if cancel.cancelled:
+                break
+            validation = {k: v/count for k, v in sums.items()}
+            if not all(np.isfinite(value) for value in validation.values()):
+                raise ValueError('Non-finite validation loss; lower learning rate and inspect the dataset.')
+            epoch += 1; cursor = 0; order = None
+            validation_step = epoch * len(train_indices)
+            log_metrics(writer, stage, 'validation', validation, validation_step)
+            emit('validation', epoch=epoch, **validation)
+            if validation['loss'] < best:
+                best = validation['loss']; checkpoint('best.pt')
+                if stage == 'vae':
+                    log_vae_previews(writer, model, data, val_indices, device, validation_step)
+                else:
+                    log_dynamics_previews(writer, model, vae, data, pairs, val_indices,
+                                          device, validation_step)
+            if epoch % c['checkpoint_frequency'] == 0:
+                checkpoint(f'epoch_{epoch:04d}.pt')
+            writer.flush()
+        checkpoint('cancelled.pt' if cancel.cancelled else 'final.pt')
+        writer.flush()
+        emit('done', cancelled=cancel.cancelled, elapsed=time.monotonic()-start, epoch=epoch)
 
 
 def main():
