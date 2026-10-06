@@ -10,3 +10,4 @@ wheels/
 .venv
 
 models/
+pixel_world_model/checkpoints/*.pt

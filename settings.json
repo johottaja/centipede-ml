@@ -15,7 +15,7 @@
   "train-freq": "3",
   "gradient-steps": "4",
   "target-update-interval": "1000",
-  "exploration-fraction": "0.2",
+  "exploration-fraction": "0.1",
   "exploration-final-eps": "0.005",
   "net-arch": "512",
   "dueling": "true",
@@ -38,5 +38,5 @@
   "reward-survival": "0",
   "reward-proximity-penalty": "0",
   "proximity-distance-tiles": "3",
-  "watch-model": "models/dqn_centipede_ckpt_42_steps"
+  "watch-model": "models/dqn_centipede_ckpt_12242944_steps"
 }
