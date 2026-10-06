@@ -32,23 +32,37 @@ Frames are uint8 `.npy` shards (512 frames each). Full trajectories are retained
 
 Episode seeds are `seed + episode_index`; the split is decided before play using an independent seeded RNG. Sampling uses another RNG independent of action exploration. Short episodes contribute all their transitions when shorter than the sample budget, without duplicates. Games run to natural termination with a configurable safety cap of 10,000 agent transitions per episode. The manifest records each episode seed, split, sample count, and whether it ended naturally, at the cap, or due to cancellation. Reset frames repeat to fill the initial stack; subsequent channels are separated by four game frames. Stacks and rollouts never cross resets. Cancelling produces a partial dataset; its split totals may differ from the requested 450/50.
 
-### Cloud runs and TensorBoard
+### Cloud runs and the browser inspector
 
 Each training output directory contains `run_config.json`, checkpoints, and TensorBoard event files under `tensorboard/`. Scalar logs include training and validation objectives plus VAE reconstruction BCE, pixel MSE, KL, or dynamics latent MSE. On each new best validation checkpoint, VAE runs log fixed held-out input/reconstruction/difference images; dynamics runs log fixed one-step actual/reconstructed/predicted comparisons. Logs flush after validation so curves remain available during cloud runs and after restart.
 
-With the default VAE output directory, start TensorBoard on the remote machine:
+Run the custom inspector on the cloud instance. It shows a training/validation loss curve and the same held-out sample comparisons as the local GUI. The curve refreshes as training writes events, and the visual comparison reloads automatically whenever the selected checkpoint changes.
+
+```sh
+uv run python -m pixel_world_model serve-vae --vae-checkpoint pixel_world_model/checkpoints/vae/best.pt --port 8765
+# Or inspect the dynamics model:
+uv run python -m pixel_world_model serve-dynamics --dynamics-checkpoint pixel_world_model/checkpoints/dynamics/best.pt --port 8765
+```
+
+Leave the inspector command running in a terminal on the instance. The server binds to `127.0.0.1` by default. From your local machine, forward the port using Verda CLI:
+
+```sh
+verda ssh <instance-id> --key ~/.ssh/your_key -- -L 8765:localhost:8765
+```
+
+Or use regular SSH with your chosen key:
+
+```sh
+ssh -i ~/.ssh/your_key -N -L 8765:127.0.0.1:8765 user@cloud-host
+```
+
+Keep that SSH command running and open <http://localhost:8765> in your local browser. Use `--settings PATH` or the matching checkpoint/dataset flags when the run uses other paths. To view training loss, point `--logdir PATH` at that run's TensorBoard event directory. Keep the output directory on persistent cloud storage if you need the curve and checkpoints after the instance stops.
+
+TensorBoard remains available for users who want to browse raw event data:
 
 ```sh
 uv run tensorboard --logdir pixel_world_model/checkpoints/vae/tensorboard --host 127.0.0.1 --port 6006
 ```
-
-From your local machine, forward the port and open `http://localhost:6006`:
-
-```sh
-ssh -N -L 6006:127.0.0.1:6006 user@cloud-host
-```
-
-Use the configured `vae_output` or `dynamics_output` path when it differs from the default. Keep those output directories on persistent cloud storage if you need the curves, images, config, and checkpoints after the compute instance stops.
 
 VAE input/output is `[0,1]`. Its loss is unweighted mean `BCEWithLogitsLoss` + beta × mean KL. BCE is averaged over batch, stack channels, and pixels; KL is averaged over batch and latent dimensions. The decoder produces raw logits for training and applies sigmoid when reconstructing/displaying images. Grayscale targets remain in `[0,1]` without binarization. Progress and inspection report reconstruction BCE and ordinary pixel MSE separately. BCE values cannot be compared numerically with previous MSE loss values; the KL beta is unchanged. Foreground weighting has been removed. A low global MSE can still hide missing small objects; inspect reconstructions rather than treating it as accuracy. Supported square resolutions are 64, 84, 128, 192, and 256. Nonmultiples of 16 use decoder interpolation to recover the requested output size.
 

@@ -8,8 +8,12 @@ from pixel_world_model.runtime import emit
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Two-stage pixel world model experiment')
-    parser.add_argument('command', choices=('collect', 'train-vae', 'train-dynamics', 'inspect-vae', 'inspect-dynamics'))
+    parser.add_argument('command', choices=('collect', 'train-vae', 'train-dynamics', 'inspect-vae', 'inspect-dynamics',
+                                           'serve-vae', 'serve-dynamics'))
     parser.add_argument('--settings', default=str(SETTINGS))
+    parser.add_argument('--host', default='127.0.0.1', help='Inspector bind address (default: loopback only)')
+    parser.add_argument('--port', type=int, default=8765, help='Inspector HTTP port')
+    parser.add_argument('--logdir', default=None, help='TensorBoard event directory for the custom loss chart')
     for key, value in DEFAULTS.items():
         parser.add_argument('--'+key.replace('_', '-'), type=type(value), default=None)
     args = parser.parse_args(argv)
@@ -23,6 +27,9 @@ def main(argv=None):
         elif args.command.startswith('train-'):
             from pixel_world_model.train import train
             train(c, args.command.removeprefix('train-'))
+        elif args.command.startswith('serve-'):
+            from pixel_world_model.web_inspector import serve
+            serve(c, args.command.removeprefix('serve-'), args.host, args.port, args.logdir)
         else:
             from pixel_world_model.visualize import visualize
             visualize(c, args.command.removeprefix('inspect-'))

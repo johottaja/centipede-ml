@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Pixel world model inspector</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1020;--panel:#111a2b;--panel2:#151f33;--line:#26334a;--muted:#93a2bb;--text:#eef3fc;--blue:#7aa7ff;--orange:#ffb454;--mint:#77d8bd;--red:#ff7d8b;--radius:16px}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 12% -10%,#1a2a4b 0,transparent 42%),var(--bg);color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button,input{font:inherit}button{color:inherit;cursor:pointer}.shell{max-width:1500px;margin:auto;padding:28px clamp(16px,3vw,42px) 48px}.eyebrow{color:var(--blue);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:22px}.title h1{font-size:clamp(26px,4vw,38px);line-height:1.1;margin:7px 0 8px;letter-spacing:-.035em}.title p{margin:0;color:var(--muted)}.badges{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.badge{border:1px solid var(--line);background:#10192a;border-radius:999px;padding:7px 11px;color:#bac7dc;font-size:12px;white-space:nowrap}.badge strong{color:var(--text);font-weight:650}.card{background:linear-gradient(145deg,rgba(20,30,49,.97),rgba(15,23,39,.97));border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 14px 40px #03071333}.section{margin-top:18px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom:13px}.section-head h2{font-size:17px;letter-spacing:-.01em;margin:0}.section-head p{margin:4px 0 0;color:var(--muted);font-size:13px}.loss-card{padding:18px 20px 14px}.loss-top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.loss-title{font-weight:720}.loss-subtitle{font-size:12px;color:var(--muted);margin-top:3px}.legend{display:flex;gap:18px;color:#c3cee0;font-size:12px}.legend span{display:inline-flex;align-items:center;gap:7px}.swatch{display:inline-block;width:20px;height:2px;border-radius:2px;background:var(--blue)}.swatch.validation{background:var(--orange);height:0;border-top:2px dashed var(--orange)}.plot{display:block;width:100%;height:245px;margin-top:8px}.loss-empty{height:245px;display:grid;place-items:center;text-align:center;color:var(--muted);padding:20px}.loss-empty strong{display:block;color:var(--text);margin-bottom:5px}.inspector{padding:18px}.controls{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}.control-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.control-label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;font-weight:750;color:var(--muted);margin-right:3px}.btn{border:1px solid #34435e;background:#1a2740;border-radius:10px;padding:8px 12px;transition:background .15s,border-color .15s,transform .15s}.btn:hover{background:#243555;border-color:#50698f}.btn:active{transform:translateY(1px)}.btn.primary{background:#315b9f;border-color:#4478c8}.btn.primary:hover{background:#3c6db7}.btn.small{padding:6px 10px;font-size:13px}.btn:disabled{opacity:.42;cursor:not-allowed}.channel.active{color:#fff;background:#315b9f;border-color:#5e91e4}.slider-row{display:grid;grid-template-columns:auto minmax(110px,1fr) auto;align-items:center;gap:11px;margin-top:17px;color:var(--muted);font-size:12px}.slider-row input{width:100%;accent-color:var(--blue)}.slider-row output{font-variant-numeric:tabular-nums;color:#d7e0f0;min-width:76px;text-align:right}.status-line{display:flex;justify-content:space-between;gap:12px;align-items:center;color:var(--muted);font-size:12px;margin-top:12px}.status-line strong{color:#dce6f6;font-weight:600}.metrics{margin-top:16px;padding:11px 14px;border-radius:11px;background:#0b1322;border:1px solid #202e43;color:#c9d5e7;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px;margin-top:16px}.panel{overflow:hidden;padding:12px;background:#0b1322;border:1px solid #202e43;border-radius:13px;min-width:0}.panel h3{font-size:13px;font-weight:650;margin:0 0 10px;color:#dce6f6}.image-wrap{aspect-ratio:1/1;background:#050912;border:1px solid #1b2639;border-radius:9px;display:grid;place-items:center;overflow:hidden}.panel img{display:block;max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;image-rendering:pixelated}.foot{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;color:#7889a4;font-size:12px;margin:13px 3px 0}.error{color:var(--red)}.hidden{display:none!important}
+    @media(max-width:720px){.shell{padding-top:18px}.top{display:block}.badges{justify-content:flex-start;margin-top:14px}.loss-top{display:block}.legend{margin-top:10px}.plot{height:215px}.controls{align-items:flex-start}.controls .control-group{width:100%}.slider-row{grid-template-columns:1fr auto}.slider-row input{grid-column:1/-1;grid-row:2}.slider-row output{grid-column:2;grid-row:1}.status-line{align-items:flex-start;flex-direction:column}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div class="title"><div class="eyebrow">Centipede · world model lab</div><h1 id="page-title">Model inspector</h1><p id="subtitle">Held-out reconstructions and autoregressive predictions</p></div>
+      <div class="badges"><span class="badge"><strong id="stage-badge">Loading</strong></span><span class="badge">Checkpoint <strong id="checkpoint">—</strong></span><span class="badge">Episode <strong id="episode">—</strong></span></div>
+    </header>
+
+    <section class="section card loss-card" aria-labelledby="loss-heading">
+      <div class="loss-top"><div><div id="loss-heading" class="loss-title">Training objective</div><div class="loss-subtitle" id="loss-subtitle">Live training and held-out validation</div></div><div class="legend"><span><i class="swatch"></i>Training</span><span><i class="swatch validation"></i>Validation</span></div></div>
+      <canvas class="plot" id="loss-plot" aria-label="Training and validation loss curve"></canvas>
+      <div class="loss-empty hidden" id="loss-empty"><div><strong>Waiting for training events</strong>Start the trainer in this output directory. The curve will update as events are written.</div></div>
+    </section>
+
+    <section class="section card inspector" aria-labelledby="inspect-heading">
+      <div class="section-head"><div><h2 id="inspect-heading">Held-out visual inspection</h2><p id="inspect-hint">Compare model output with the recorded sample.</p></div><div class="control-group"><button class="btn small" id="play">▶ Play</button><button class="btn small" id="next-trajectory">Next trajectory</button></div></div>
+      <div class="controls">
+        <div class="control-group"><span class="control-label">Browse</span><button class="btn" id="previous" aria-label="Previous sample or step">← Previous</button><button class="btn" id="next" aria-label="Next sample or step">Next →</button><button class="btn small" id="reset">Reset</button></div>
+        <div class="control-group"><span class="control-label">Stack frame</span><div id="channels" class="control-group" role="group" aria-label="Stack frame"></div></div>
+      </div>
+      <div class="slider-row" id="sample-row"><label for="sample-slider">Held-out sample</label><input id="sample-slider" type="range" min="0" max="0" value="0"><output id="sample-value">—</output></div>
+      <div class="slider-row hidden" id="step-row"><label for="step-slider">Rollout step</label><input id="step-slider" type="range" min="0" max="0" value="0"><output id="step-value">—</output></div>
+      <div class="slider-row hidden" id="horizon-row"><label for="horizon-slider">Rollout horizon</label><input id="horizon-slider" type="range" min="1" max="100" value="15"><output id="horizon-value">15 steps</output></div>
+      <div class="status-line"><span id="position-summary">Loading held-out sample…</span><span id="checkpoint-time">Checkpoint updates are picked up automatically.</span></div>
+      <div class="metrics" id="metrics">Loading model comparison…</div>
+      <div class="panels" id="panels" aria-live="polite"></div>
+      <div class="foot"><span>Keyboard: ← / → navigate · 1–4 select frame · Space play/pause · N next trajectory · [ / ] horizon</span><span id="connection">Connecting…</span></div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = {stage:null, revision:-1, playing:false, timer:null, loss:null};
+    const canvas = $('loss-plot');
+    const ctx = canvas.getContext('2d');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    async function getJson(url){
+      const response=await fetch(url,{cache:'no-store'});
+      const body=await response.json();
+      if(!response.ok) throw new Error(body.error||`HTTP ${response.status}`);
+      return body;
+    }
+    async function send(action,fields={}){
+      try{
+        const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...fields})});
+        const body=await response.json();
+        if(!response.ok) throw new Error(body.error||`HTTP ${response.status}`);
+        render(body); $('connection').textContent='Connected'; $('connection').classList.remove('error');
+      }catch(error){showError(error);}
+    }
+    function showError(error){$('connection').textContent=error.message;$('connection').classList.add('error');}
+    function makeChannels(){
+      const host=$('channels');host.replaceChildren();
+      for(let i=0;i<4;i++){
+        const button=document.createElement('button');button.className='btn small channel';button.textContent=String(i+1);button.title=`Stack frame ${i+1}`;
+        button.addEventListener('click',()=>send('channel',{channel:i}));host.append(button);
+      }
+    }
+    function render(data){
+      if(data.revision===state.revision)return;
+      state.revision=data.revision;
+      state.stage=data.stage;
+      state.lastStep=data.step;
+      const isVae=data.stage==='vae';
+      $('page-title').textContent=isVae?'VAE inspector':'Dynamics inspector';
+      $('subtitle').textContent=isVae?'Inspect deterministic reconstructions across held-out game frames.':'Inspect autoregressive latent predictions against recorded future frames.';
+      $('stage-badge').textContent=isVae?'VAE':'DYNAMICS';
+      $('checkpoint').textContent=data.checkpoint;
+      $('episode').textContent=String(data.episode+1);
+      $('sample-row').classList.toggle('hidden',!isVae);
+      $('step-row').classList.toggle('hidden',isVae);
+      $('horizon-row').classList.toggle('hidden',isVae);
+      $('next-trajectory').classList.toggle('hidden',isVae);
+      $('inspect-hint').textContent=isVae?'Original, deterministic reconstruction, and pixelwise difference.':'The predictor feeds its own latent output into each following step.';
+      $('sample-slider').max=String(Math.max(0,data.samples-1));$('sample-slider').value=String(data.sample);
+      $('sample-value').textContent=`${data.sample+1} / ${data.samples}`;
+      $('step-slider').max=String(data.steps);$('step-slider').value=String(data.step);
+      $('step-value').textContent=`${data.step} / ${data.steps}`;
+      $('horizon-slider').value=String(data.horizon);$('horizon-value').textContent=`${data.horizon} steps`;
+      $('position-summary').innerHTML=isVae?`Held-out sample <strong>${data.sample+1} of ${data.samples}</strong> · stack frame <strong>${data.channel+1} of 4</strong>`:`Held-out sample <strong>${data.sample+1} of ${data.samples}</strong> · rollout step <strong>${data.step} of ${data.steps}</strong> · stack frame <strong>${data.channel+1} of 4</strong>`;
+      $('metrics').textContent=data.metrics;
+      const channelButtons=$('channels').querySelectorAll('button');channelButtons.forEach((button,index)=>button.classList.toggle('active',index===data.channel));
+      const panels=$('panels');panels.replaceChildren();
+      for(const panel of data.panels){
+        const card=document.createElement('article');card.className='panel';
+        const title=document.createElement('h3');title.textContent=panel.title;
+        const wrap=document.createElement('div');wrap.className='image-wrap';
+        const image=document.createElement('img');image.src=panel.image;image.alt=panel.title;image.draggable=false;
+        wrap.append(image);card.append(title,wrap);panels.append(card);
+      }
+      if(data.checkpoint_modified){$('checkpoint-time').textContent=`Loaded ${new Date(data.checkpoint_modified*1000).toLocaleString()} · refreshes when the checkpoint changes`}
+      $('play').textContent=state.playing?'Ⅱ Pause':'▶ Play';
+      $('connection').textContent='Connected';$('connection').classList.remove('error');
+    }
+    function fitCanvas(){
+      drawLoss();
+    }
+    function drawLoss(){
+      const history=state.loss;
+      if(!history||!history.available){canvas.classList.add('hidden');$('loss-empty').classList.remove('hidden');return;}
+      canvas.classList.remove('hidden');$('loss-empty').classList.add('hidden');
+      const rect=canvas.getBoundingClientRect(),width=rect.width,height=rect.height;
+      if(!width||!height)return;
+      const ratio=window.devicePixelRatio||1;
+      if(canvas.width!==Math.round(width*ratio)||canvas.height!==Math.round(height*ratio)){
+        canvas.width=Math.round(width*ratio);canvas.height=Math.round(height*ratio);
+      }
+      ctx.setTransform(ratio,0,0,ratio,0,0);
+      ctx.clearRect(0,0,width,height);
+      $('loss-heading').textContent=`Training objective · ${history.metric_label}`;
+      const points=[...history.train,...history.validation];
+      const latest=points.reduce((maximum,point)=>Math.max(maximum,point[0]),0);
+      const xMax=Math.max(history.max_epochs||1,latest,1);
+      const maxValue=points.reduce((maximum,point)=>Math.max(maximum,point[1]),1e-8);
+      const yMax=maxValue*1.12;
+      const left=64,right=16,top=12,bottom=33,plotW=Math.max(1,width-left-right),plotH=Math.max(1,height-top-bottom);
+      ctx.font='11px ui-sans-serif,system-ui';ctx.lineWidth=1;
+      for(let tick=0;tick<=4;tick++){
+        const fraction=tick/4,y=top+plotH*(1-fraction),value=yMax*fraction;
+        ctx.strokeStyle='#26334a';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(width-right,y);ctx.stroke();
+        ctx.fillStyle='#93a2bb';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(Number(value.toPrecision(3)).toString(),left-9,y);
+        const x=left+plotW*fraction;ctx.strokeStyle='#202c40';ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,top+plotH);ctx.stroke();
+        ctx.textAlign='center';ctx.textBaseline='top';ctx.fillStyle='#93a2bb';ctx.fillText((xMax*fraction).toFixed(xMax>20?0:1).replace(/\.0$/,''),x,top+plotH+9);
+      }
+      ctx.fillStyle='#93a2bb';ctx.textAlign='center';ctx.fillText('Epoch',left+plotW/2,height-3);
+      const drawSeries=(series,color,dashed)=>{
+        if(!series.length)return;
+        ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash(dashed?[6,5]:[]);
+        series.forEach((point,index)=>{const x=left+plotW*Math.max(0,Math.min(1,point[0]/xMax)),y=top+plotH*(1-Math.max(0,Math.min(1,point[1]/yMax)));if(index===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.stroke();ctx.setLineDash([]);
+        if(dashed){for(const point of series){const x=left+plotW*Math.max(0,Math.min(1,point[0]/xMax)),y=top+plotH*(1-Math.max(0,Math.min(1,point[1]/yMax)));ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();}}
+      };
+      drawSeries(history.train,'#7aa7ff',false);drawSeries(history.validation,'#ffb454',true);
+      const train=history.train.at(-1),validation=history.validation.at(-1);
+      if(train){const x=left+plotW*Math.max(0,Math.min(1,train[0]/xMax)),y=top+plotH*(1-Math.max(0,Math.min(1,train[1]/yMax)));ctx.fillStyle='#7aa7ff';ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fill();}
+      $('loss-subtitle').textContent=`${train?`train ${train[1].toPrecision(5)}`:'waiting for training'}   ·   ${validation?`validation ${validation[1].toPrecision(5)}`:'validation pending'}   ·   auto-refreshes every 5s`;
+    }
+    async function loadLoss(){try{state.loss=await getJson('/api/loss');drawLoss();}catch(error){showError(error);}}
+    async function refresh(){try{render(await getJson('/api/state'));}catch(error){showError(error);}}
+    function stopPlay(){if(state.timer){clearTimeout(state.timer);state.timer=null;}state.playing=false;$('play').textContent='▶ Play';}
+    function playTick(){
+      if(!state.playing)return;
+      if(document.hidden||(state.stage==='dynamics'&&Number($('step-slider').value)>=Number($('step-slider').max))){stopPlay();return;}
+      send('advance',{amount:1}).finally(()=>{if(state.playing)state.timer=setTimeout(playTick,420);});
+    }
+    function togglePlay(){
+      if(state.playing){stopPlay();return;}
+      if(reducedMotion.matches){$('connection').textContent='Autoplay is disabled by your reduced-motion setting.';return;}
+      state.playing=true;$('play').textContent='Ⅱ Pause';$('play').blur();
+      state.timer=setTimeout(playTick,420);
+    }
+    $('previous').addEventListener('click',()=>send('advance',{amount:-1}));
+    $('next').addEventListener('click',()=>send('advance',{amount:1}));
+    $('reset').addEventListener('click',()=>send('reset'));
+    $('play').addEventListener('click',togglePlay);
+    $('next-trajectory').addEventListener('click',()=>send('next_trajectory'));
+    $('sample-slider').addEventListener('change',event=>send('sample',{position:Number(event.target.value)}));
+    $('step-slider').addEventListener('input',event=>{$('step-value').textContent=`${event.target.value} / ${event.target.max}`;});
+    $('step-slider').addEventListener('change',event=>send('step',{step:Number(event.target.value)}));
+    $('horizon-slider').addEventListener('input',event=>{$('horizon-value').textContent=`${event.target.value} steps`;});
+    $('horizon-slider').addEventListener('change',event=>send('horizon',{horizon:Number(event.target.value)}));
+    $('panels').addEventListener('pointerenter',()=>{if(state.playing)stopPlay();});
+    document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.playing)stopPlay();});
+    document.addEventListener('keydown',event=>{
+      if(['INPUT','BUTTON'].includes(document.activeElement?.tagName))return;
+      if(event.code==='Space'){event.preventDefault();togglePlay();}
+      else if(event.key==='ArrowLeft')send('advance',{amount:-1});
+      else if(event.key==='ArrowRight')send('advance',{amount:1});
+      else if(event.key.toLowerCase()==='n'&&state.stage==='dynamics')send('next_trajectory');
+      else if(event.key==='['&&state.stage==='dynamics')send('horizon',{horizon:Math.max(1,Number($('horizon-slider').value)-1)});
+      else if(event.key===']'&&state.stage==='dynamics')send('horizon',{horizon:Math.min(100,Number($('horizon-slider').value)+1)});
+      else if(/^[1-4]$/.test(event.key))send('channel',{channel:Number(event.key)-1});
+    });
+    makeChannels();
+    refresh();loadLoss();
+    setInterval(loadLoss,5000);
+    setInterval(refresh,8000);
+    window.addEventListener('resize',fitCanvas);
+    new ResizeObserver(fitCanvas).observe(canvas);
+  </script>
+</body>
+</html>
