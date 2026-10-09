@@ -8,9 +8,15 @@ FRAME_GAP = 4
 IMG_SIZE = 128
 
 
-def reconstruction_loss(logits, target):
-    """Stable BCE on raw logits, with pixel MSE retained as a diagnostic."""
-    bce = F.binary_cross_entropy_with_logits(logits, target)
+def reconstruction_loss(logits, target, foreground_weight=9.0):
+    """Weight non-black target pixels while preserving grayscale BCE targets.
+
+    A weight of 9 balances approximately 10% foreground against 90% black
+    background. Normalize by total weight to preserve the objective scale.
+    """
+    pixel_loss = F.binary_cross_entropy_with_logits(logits, target, reduction='none')
+    weights = torch.where(target > 0, foreground_weight, 1.0)
+    bce = (pixel_loss * weights).sum() / weights.sum()
     mse = F.mse_loss(logits.sigmoid(), target)
     return bce, {'reconstruction': bce.item(), 'pixel_mse': mse.item()}
 
@@ -57,9 +63,9 @@ class VisualVAE(nn.Module):
         logits, mu, logvar = self.forward_logits(x, sample)
         return logits.sigmoid(), mu, logvar
 
-    def loss(self, x, beta=0.0001, sample=True):
+    def loss(self, x, beta=0.0001, sample=True, foreground_weight=9.0):
         logits, mu, logvar = self.forward_logits(x, sample)
-        bce, metrics = reconstruction_loss(logits, x)
+        bce, metrics = reconstruction_loss(logits, x, foreground_weight)
         kl = (-0.5 * (1 + logvar - mu.square() - logvar.exp())).mean()
         return bce + beta * kl, {**metrics, 'kl': kl.item()}
 

@@ -28,8 +28,19 @@ def main(argv=None):
             from pixel_world_model.train import train
             train(c, args.command.removeprefix('train-'))
         elif args.command.startswith('serve-'):
-            from pixel_world_model.web_inspector import serve
-            serve(c, args.command.removeprefix('serve-'), args.host, args.port, args.logdir)
+            import json
+            import subprocess
+            from pathlib import Path
+            stage = args.command.removeprefix('serve-')
+            if getattr(args, f'{stage}_checkpoint') is None:
+                c[f'{stage}_checkpoint'] = str(Path(c[f'{stage}_output']) / 'current.pt')
+            command = [sys.executable, '-m', 'streamlit', 'run',
+                       str(Path(__file__).with_name('streamlit_inspector.py')),
+                       '--server.address', args.host, '--server.port', str(args.port),
+                       '--server.headless', 'true', '--', '--config', json.dumps(c), '--stage', stage]
+            if args.logdir:
+                command.extend(['--logdir', args.logdir])
+            return subprocess.call(command)
         else:
             from pixel_world_model.visualize import visualize
             visualize(c, args.command.removeprefix('inspect-'))

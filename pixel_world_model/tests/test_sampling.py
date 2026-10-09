@@ -36,7 +36,7 @@ class SamplingTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.c = DEFAULTS | dict(dataset=str(self.root/'data'), episodes=5,
-                                validation_episodes=1, samples_per_episode=4,
+                                validation_episodes=1, samples_per_episode=4, collection_workers=1,
                                 episode_limit=100, resolution=64, device='cpu', seed=1000)
 
     def tearDown(self):
@@ -138,8 +138,79 @@ class SamplingTests(unittest.TestCase):
         self.assertEqual(len(view.data), 4)
         self.assertEqual(len(view.trajectory), min(15, data.meta['episodes'][int(data.transitions['episodes'][view.index])]['end']-view.index))
 
+    def test_spawned_collection_preserves_context_and_worker_independent_seeds(self):
+        datasets = []
+        for workers in (2, 3):
+            c = self.c | dict(collection_workers=workers, exploration=1.0,
+                              episode_limit=4, dataset=str(self.root/f'parallel{workers}'))
+            with patch('pixel_world_model.policy.resolve_policy_model', return_value='fake'), \
+                 patch('pixel_world_model.policy.load_c51_policy', return_value=object()):
+                collect(c)
+            data = TransitionDataset(c['dataset'])
+            self.assertEqual(data.meta['count'], 20)
+            self.assertEqual(len(data), 20)
+            self.assertEqual(len(TransitionDataset(c['dataset'], 'validation')), 4)
+            by_seed = {}
+            for eid, ep in enumerate(data.meta['episodes']):
+                self.assertEqual(ep['ended_by'], 'safety_cap')
+                self.assertEqual(ep['split'], episode_splits(5, 1, 1000)[ep['seed']-1000])
+                self.assertTrue(np.all(data.transitions['episodes'][ep['start']:ep['end']] == eid))
+                first, _, _ = data.raw(ep['start'])
+                self.assertTrue(all(np.array_equal(first[0], frame) for frame in first))
+                for i in range(ep['start'], ep['end']-1):
+                    self.assertTrue(np.array_equal(data.raw(i)[2], data.raw(i+1)[0]))
+                by_seed[ep['seed']] = [data.raw(i) for i in range(ep['start'], ep['end'])]
+            datasets.append(by_seed)
+        for seed in datasets[0]:
+            for left, right in zip(datasets[0][seed], datasets[1][seed], strict=True):
+                self.assertEqual(left[1], right[1])
+                np.testing.assert_array_equal(left[0], right[0])
+                np.testing.assert_array_equal(left[2], right[2])
+
+    def test_parallel_cancellation_flushes_active_episodes(self):
+        from pixel_world_model.data import parallel_episodes
+        from types import SimpleNamespace
+        target = self.root/'cancelled'
+        target.mkdir()
+        cancel = SimpleNamespace(cancelled=False)
+        c = self.c | dict(collection_workers=2, exploration=1.0, episode_limit=10000)
+        results = list(parallel_episodes(c, target, object(), cancel,
+                                        lambda *_: setattr(cancel, 'cancelled', True)))
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(ep[-1] == 'cancelled' for ep in results))
+        for _, shards, actions, terminals, _ in results:
+            self.assertEqual(sum(shard['count'] for shard in shards), len(actions)+1)
+            self.assertEqual(len(actions), len(terminals))
+            for shard in shards:
+                self.assertTrue((target/shard['file']).is_file())
+
+    def test_worker_errors_are_propagated(self):
+        from pixel_world_model.data import parallel_episodes
+        from types import SimpleNamespace
+        target = self.root/'failed'
+        c = self.c | dict(collection_workers=2, exploration=1.0, episode_limit=1)
+        with self.assertRaisesRegex(RuntimeError, 'Collection worker failed'):
+            list(parallel_episodes(c, target, object(), SimpleNamespace(cancelled=False), lambda *_: None))
+
+    def test_batched_policy_inference(self):
+        from pixel_world_model.policy import greedy_actions
+        from types import SimpleNamespace
+        model = SimpleNamespace(policy=SimpleNamespace(obs_to_tensor=lambda obs: (torch.tensor(obs), True)),
+                                q_net=lambda obs: obs)
+        np.testing.assert_array_equal(greedy_actions(model, np.array([[0, 3, 1], [4, 2, 0]])), [1, 0])
+
+    def test_consecutive_mode_selects_every_transition(self):
+        c = self.c | dict(collection_mode='consecutive')
+        self.collect_fake(length=7, c=c)
+        data = TransitionDataset(c['dataset'])
+        self.assertEqual(len(data), 35)
+        np.testing.assert_array_equal(data.sample_indices, np.arange(35))
+        self.assertEqual(data.meta['collection_mode'], 'consecutive')
+        self.assertEqual(len(TransitionDataset(c['dataset'], 'train')), 28)
+        self.assertEqual(len(TransitionDataset(c['dataset'], 'validation')), 7)
+
     def test_configuration_split_bounds(self):
-        for key, value in [('episodes', 0), ('validation_episodes', 0),
+        for key, value in [('collection_mode', 'unknown'), ('collection_workers', 0), ('episodes', 0), ('validation_episodes', 0),
                            ('validation_episodes', 500), ('samples_per_episode', 0)]:
             with self.subTest(key=key), self.assertRaises(ValueError):
                 validate(DEFAULTS | {key: value})

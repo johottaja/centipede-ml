@@ -10,12 +10,15 @@ from pixel_world_model.config import DEFAULTS, PROJECT, SETTINGS, load, save, va
 
 GROUPS = {
     'Data': [('policy_model', 'C51 policy (.zip)', 'file'), ('dataset', 'Dataset directory', 'directory'),
+             ('collection_mode', 'Sampling mode', 'collection_mode'),
+             ('collection_workers', 'Collection workers', ''),
              ('episodes', 'Episodes to play', ''), ('validation_episodes', 'Validation episodes', ''),
              ('samples_per_episode', 'Samples per episode', ''), ('resolution', 'Image resolution', 'resolution'),
              ('exploration', 'Random action probability', ''), ('seed', 'Seed', ''),
              ('episode_limit', 'Safety cap (transitions per episode)', '')],
     'Step 1: VAE': [('dataset', 'Dataset directory', 'directory'), ('latent_dim', 'Latent dimension', ''),
                     ('beta', 'KL weight (beta)', ''),
+                    ('vae_foreground_weight', 'Non-black pixel weight (black = 1)', ''),
                     ('vae_lr', 'Learning rate', ''),
                     ('vae_batch', 'Batch size', ''), ('vae_epochs', 'Total epochs', ''),
                     ('vae_output', 'Checkpoint output directory', 'directory'),
@@ -23,6 +26,9 @@ GROUPS = {
                     ('vae_checkpoint', 'VAE checkpoint to inspect / use in Step 2', 'checkpoint')],
     'Step 2: Dynamics': [('dataset', 'Dataset directory', 'directory'),
                         ('vae_checkpoint', 'Frozen VAE checkpoint', 'checkpoint'),
+                        ('dynamics_foreground_weight', 'Non-black pixel weight (black = 1)', ''),
+                        ('dynamics_pixel_loss_weight', 'Visual prediction loss weight (0 = off)', ''),
+                        ('dynamics_visual_batch', 'Visual samples per training batch', ''),
                         ('dynamics_lr', 'Learning rate', ''), ('dynamics_batch', 'Batch size', ''),
                         ('dynamics_epochs', 'Total epochs', ''), ('hidden_width', 'Hidden width', ''),
                         ('blocks', 'Residual blocks', 'blocks'),
@@ -49,7 +55,7 @@ class LossPlot:
         self.train_loss = None
         self.validation_loss = None
 
-        ttk.Label(self.window, text='VAE objective: BCE + β KL',
+        ttk.Label(self.window, text='VAE objective: weighted BCE + β KL',
                   font=('TkDefaultFont', 13, 'bold')).pack(anchor='w', padx=16, pady=(14, 2))
         self.summary = tk.StringVar(value='Waiting for the first training update…')
         ttk.Label(self.window, textvariable=self.summary).pack(anchor='w', padx=16, pady=(0, 8))
@@ -209,8 +215,8 @@ class Launcher:
             all_fields = fields + [('device', 'Device', 'device'), ('checkpoint_frequency', 'Checkpoint frequency (epochs)', '')]
             for row, (key, label, kind) in enumerate(all_fields):
                 ttk.Label(form, text=label).grid(row=row, column=0, sticky='w', padx=(0, 12), pady=5)
-                if kind in ('resolution', 'blocks', 'device'):
-                    choices = {'resolution': (64, 84, 128, 192, 256), 'blocks': (2, 3), 'device': ('auto', 'cpu', 'mps', 'cuda')}[kind]
+                if kind in ('resolution', 'blocks', 'device', 'collection_mode'):
+                    choices = {'collection_mode': ('sampled', 'consecutive'), 'resolution': (64, 84, 128, 192, 256), 'blocks': (2, 3), 'device': ('auto', 'cpu', 'mps', 'cuda')}[kind]
                     widget = ttk.Combobox(form, textvariable=self.variables[key], values=choices, state='readonly')
                 elif kind == 'checkpoint':
                     paths = sorted((PROJECT / 'pixel_world_model' / 'checkpoints').rglob('*.pt'))
@@ -225,6 +231,7 @@ class Launcher:
             bar = ttk.Frame(tab, padding=10); bar.pack(fill='x')
             if title == 'Data':
                 self.button(bar, 'Collect dataset', 'collect')
+                ttk.Label(bar, text='Sampled: diverse examples for VAE · Consecutive: every transition for dynamics').pack(side='left', padx=10)
             elif title == 'Step 1: VAE':
                 self.button(bar, 'Train Step 1', 'train-vae'); self.button(bar, 'Inspect VAE', 'inspect-vae')
             else:

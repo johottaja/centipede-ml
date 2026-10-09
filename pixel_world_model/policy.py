@@ -42,3 +42,10 @@ def greedy_action(model: C51, obs: np.ndarray) -> int:
     with th.no_grad():
         q = model.q_net(obs_t)
         return int(q.argmax(dim=1).item())
+
+
+def greedy_actions(model: C51, observations: np.ndarray) -> np.ndarray:
+    """Predict a whole environment batch with one device round trip."""
+    obs_t, _ = model.policy.obs_to_tensor(observations)
+    with th.inference_mode():
+        return model.q_net(obs_t).argmax(dim=1).cpu().numpy()

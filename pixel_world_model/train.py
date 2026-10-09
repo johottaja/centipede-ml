@@ -8,7 +8,7 @@ import torch
 from torch.nn import functional as F
 from torch.utils.tensorboard import SummaryWriter
 from pixel_world_model.data import TransitionDataset
-from pixel_world_model.nets import VisualVAE, ActionLatentDynamics
+from pixel_world_model.nets import VisualVAE, ActionLatentDynamics, reconstruction_loss
 from pixel_world_model.runtime import (VERSION, Cancellation, atomic_save, load_checkpoint,
                                        fingerprint, device_for, emit, progress)
 
@@ -21,8 +21,10 @@ def load_vae(path, device='cpu'):
     return model, ck
 
 
-def compatible(ck, data):
-    if ck['dataset_id'] != data.meta['id'] or ck['preprocessing'] != preprocessing(data):
+def compatible(ck, data, require_dataset=True):
+    # Frozen VAEs can encode other datasets with identical image preprocessing.
+    # Resume and dynamics inspection still require the run's exact dataset.
+    if (require_dataset and ck['dataset_id'] != data.meta['id']) or ck['preprocessing'] != preprocessing(data):
         raise ValueError('Checkpoint does not match the selected dataset/preprocessing. Select the original dataset or start a new run.')
 
 
@@ -32,7 +34,7 @@ def preprocessing(data):
 
 def log_metrics(writer, stage, split, metrics, step):
     writer.add_scalar(f'loss/{split}', float(metrics['loss']), step)
-    for name in ('reconstruction', 'pixel_mse', 'kl', 'latent_mse'):
+    for name in ('reconstruction', 'pixel_mse', 'kl', 'latent_mse', 'prediction_bce'):
         if name in metrics:
             writer.add_scalar(f'{stage}/{name}/{split}', float(metrics[name]), step)
 
@@ -129,7 +131,7 @@ def train(c, stage):
         pairs = None
     else:
         vae, vae_ck = load_vae(c['vae_checkpoint'], device)
-        compatible(vae_ck, data)
+        compatible(vae_ck, data, require_dataset=False)
         vae_id = fingerprint(c['vae_checkpoint'])
         arch = {'latent_dim': vae.latent_dim, 'hidden_width': c['hidden_width'], 'blocks': c['blocks']}
         model = ActionLatentDynamics(**arch).to(device)
@@ -151,9 +153,17 @@ def train(c, stage):
         for group in optimizer.param_groups:
             group['lr'] = lr
         epoch, cursor, updates, best, order = (ck[k] for k in ('epoch', 'cursor', 'updates', 'best', 'order'))
-        if stage == 'vae' and ck.get('reconstruction_loss') != 'bce_logits_v1':
+        if stage == 'vae' and (ck.get('reconstruction_loss') != 'foreground_weighted_bce_v1'
+                               or ck['config'].get('vae_foreground_weight', 1.0) != c['vae_foreground_weight']):
             best = float('inf')
-            emit('log', text='Switched reconstruction loss to BCE with logits; retaining model/optimizer progress and resetting best validation loss.')
+            emit('log', text='Changed reconstruction weighting; retaining model/optimizer progress and resetting best validation loss.')
+        if stage == 'dynamics' and (
+                ck.get('dynamics_loss') != 'latent_mse_weighted_bce_v1'
+                or ck['config'].get('dynamics_foreground_weight', 9.0) != c['dynamics_foreground_weight']
+                or ck['config'].get('dynamics_pixel_loss_weight', 0.0) != c['dynamics_pixel_loss_weight']
+                or ck['config'].get('dynamics_visual_batch', batch) != c['dynamics_visual_batch']):
+            best = float('inf')
+            emit('log', text='Changed dynamics objective/weighting; resetting best validation loss while retaining training progress.')
         rng.bit_generator.state = ck['numpy_rng']
         torch.set_rng_state(ck['torch_rng'].cpu())
         if device.type == 'cuda' and ck.get('cuda_rng') is not None:
@@ -161,13 +171,20 @@ def train(c, stage):
         if device.type == 'mps' and ck.get('mps_rng') is not None:
             torch.mps.set_rng_state(ck['mps_rng'].cpu())
     output = Path(c[prefix+'_output'])
+    if stage == 'dynamics':
+        associated = output / 'associated_vae.pt'
+        if associated.exists() and fingerprint(associated) != vae_id:
+            if resume:
+                raise ValueError('Output directory belongs to a different VAE. Select a new dynamics output directory.')
+            # Preserve checkpoints, their pinned VAE, and logs together before a fresh run.
+            archived = output.with_name(f'{output.name}-previous-{time.time_ns()}')
+            output.rename(archived)
+            emit('log', text=f'Archived previous dynamics run to {archived}; starting with the selected VAE.')
     output.mkdir(parents=True, exist_ok=True)
     (output / 'run_config.json').write_text(json.dumps(c, indent=2) + '\n')
     # Pin a full copy of the VAE to this dynamics run; paths alone are not sufficient.
     if stage == 'dynamics':
         associated = output / 'associated_vae.pt'
-        if associated.exists() and fingerprint(associated) != vae_id:
-            raise ValueError('Output directory belongs to a different VAE. Select a new dynamics output directory.')
         if not associated.exists():
             import shutil
             shutil.copyfile(c['vae_checkpoint'], associated)
@@ -178,12 +195,13 @@ def train(c, stage):
     def checkpoint(name):
         payload = dict(version=VERSION, stage=stage, model=model.state_dict(), optimizer=optimizer.state_dict(),
                        architecture=arch, dataset_id=data.meta['id'], preprocessing=preprocessing(data),
-                       config=c, reconstruction_loss='bce_logits_v1' if stage == 'vae' else None, epoch=epoch, cursor=cursor, updates=updates, best=best, order=order,
+                       config=c, reconstruction_loss='foreground_weighted_bce_v1' if stage == 'vae' else None, epoch=epoch, cursor=cursor, updates=updates, best=best, order=order,
                        numpy_rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(), vae_id=vae_id,
                        cuda_rng=torch.cuda.get_rng_state_all() if device.type == 'cuda' else None,
                        mps_rng=torch.mps.get_rng_state() if device.type == 'mps' else None)
         if stage == 'dynamics':
             payload['vae_path'] = 'associated_vae.pt'
+            payload['dynamics_loss'] = 'latent_mse_weighted_bce_v1'
         path = output / name
         atomic_save(payload, path)
         emit('checkpoint', path=str(path), epoch=epoch, updates=updates)
@@ -191,13 +209,33 @@ def train(c, stage):
     def loss_for(indices, sampling):
         if stage == 'vae':
             x = torch.as_tensor(np.stack([data.raw(int(i))[0] for i in indices]), dtype=torch.float32, device=device)/255
-            return model.loss(x, c['beta'], sample=sampling)
+            return model.loss(x, c['beta'], sample=sampling, foreground_weight=c['vae_foreground_weight'])
         positions = np.searchsorted(data.sample_indices, indices)
         z = torch.tensor(np.asarray(pairs[positions, 0]), device=device)
         target = torch.tensor(np.asarray(pairs[positions, 1]), device=device)
         actions = torch.as_tensor(data.transitions['actions'][indices], device=device)
-        loss = F.mse_loss(model(z, actions), target)
-        return loss, {'latent_mse': loss.item()}
+        prediction = model(z, actions)
+        latent_mse = F.mse_loss(prediction, target)
+        if c['dynamics_pixel_loss_weight'] == 0:
+            return latent_mse, {'latent_mse': latent_mse.item()}
+        # Sample the visual objective independently of the full latent batch.
+        # The saved NumPy RNG makes sampling reproducible across resumes.
+        if sampling and len(indices) > c['dynamics_visual_batch']:
+            visual_positions = rng.choice(len(indices), c['dynamics_visual_batch'], replace=False)
+            visual_indices = indices[visual_positions]
+            visual_prediction = prediction[torch.as_tensor(visual_positions, device=device)]
+        else:
+            visual_indices, visual_prediction = indices, prediction
+        # Load only target stacks: raw() also builds unused current stacks.
+        images = torch.as_tensor(np.stack([
+            data.stack(int(data.transitions['nexts'][i]), int(data.transitions['episodes'][i]))
+            for i in visual_indices]), dtype=torch.float32, device=device) / 255
+        # Decoder parameters stay frozen; autograd still reaches predicted latents.
+        pixel_loss, metrics = reconstruction_loss(
+            vae.decode_logits(visual_prediction), images, c['dynamics_foreground_weight'])
+        loss = latent_mse + c['dynamics_pixel_loss_weight'] * pixel_loss
+        return loss, {'latent_mse': latent_mse.item(), 'prediction_bce': pixel_loss.item(),
+                      'pixel_mse': metrics['pixel_mse']}
 
     start = time.monotonic()
     total = epochs * len(train_indices)
@@ -266,8 +304,10 @@ def train(c, stage):
                                           device, validation_step)
             if epoch % c['checkpoint_frequency'] == 0:
                 checkpoint(f'epoch_{epoch:04d}.pt')
+            checkpoint('current.pt')
             writer.flush()
         checkpoint('cancelled.pt' if cancel.cancelled else 'final.pt')
+        checkpoint('current.pt')
         writer.flush()
         emit('done', cancelled=cancel.cancelled, elapsed=time.monotonic()-start, epoch=epoch)
 

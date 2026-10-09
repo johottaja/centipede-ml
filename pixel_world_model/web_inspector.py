@@ -41,9 +41,9 @@ class InspectorSession:
         self.config = config
         self.stage = stage
         self.lock = threading.RLock()
-        self.view = Inspection(config, stage)
         self.checkpoint = Path(config[f'{stage}_checkpoint'])
         self.checkpoint_signature = self._signature()
+        self.view = Inspection(config, stage)
         self.revision = 0
         self.cached_state = None
 
@@ -67,7 +67,7 @@ class InspectorSession:
         if self.stage == 'dynamics':
             view.step = min(previous.step, len(view.actions))
         self.view = view
-        self.checkpoint_signature = self._signature()
+        self.checkpoint_signature = signature
         self.revision += 1
         self.cached_state = None
 
@@ -154,7 +154,7 @@ class LossHistory:
         self.logdir = self.logdirs[0]
         self.train_count = len(TransitionDataset(config['dataset'], 'train'))
         self.epochs = int(config[f'{prefix}_epochs'])
-        self.metric_label = 'BCE + β KL' if stage == 'vae' else 'Latent MSE'
+        self.metric_label = 'BCE + β KL' if stage == 'vae' else 'Latent MSE + weighted prediction BCE'
         self.accumulator = None
         self.accumulator_dir = None
         self.cache = {'available': False, 'train': [], 'validation': [], 'max_epochs': self.epochs,

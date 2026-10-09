@@ -44,10 +44,10 @@ class Inspection:
             if not vae_path.exists() or fingerprint(vae_path) != ck['vae_id']:
                 raise ValueError('Associated VAE missing or changed. Restore associated_vae.pt from the original dynamics run.')
             self.vae, vae_ck = load_vae(vae_path, self.device)
-            compatible(vae_ck, self.data)
+            compatible(vae_ck, self.data, require_dataset=False)
             self.dynamics = ActionLatentDynamics(**ck['architecture']).to(self.device)
             self.dynamics.load_state_dict(ck['model']); self.dynamics.eval()
-        compatible(ck, self.data)
+        compatible(ck, self.data, require_dataset=stage != 'vae')
         self.position, self.step, self.channel = 0, 0, 3
         self.horizon = c['horizon']
         self.playing = False
